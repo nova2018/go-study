@@ -159,6 +159,7 @@ func typedmemmove(typ *_type, dst, src unsafe.Pointer) {
 		return
 	}
 	if writeBarrier.needed && typ.ptrdata != 0 {
+		// 注：写屏障
 		bulkBarrierPreWrite(uintptr(dst), uintptr(src), typ.ptrdata)
 	}
 	// There's a race here: if some other goroutine can write to

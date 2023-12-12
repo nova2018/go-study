@@ -3,16 +3,22 @@
 // license that can be found in the LICENSE file.
 
 // Garbage collector: type and heap bitmaps.
+// 译：垃圾收集器：类型和堆位图。
 //
 // Stack, data, and bss bitmaps
+// 译：栈、数据和bss(注：未初始化数据区)的位图
 //
 // Stack frames and global variables in the data and bss sections are
 // described by bitmaps with 1 bit per pointer-sized word. A "1" bit
 // means the word is a live pointer to be visited by the GC (referred to
 // as "pointer"). A "0" bit means the word should be ignored by GC
 // (referred to as "scalar", though it could be a dead pointer value).
+// 译：数据和BSS部分中栈帧和全局变量由位图描述，每个指针大小的字1位
+// 译：位“1”表示该字是GC要访问的活动指针(称为“指针”)。
+// 译：位“0”表示GC应忽略该字(称为“标量”，尽管它可能是死指针值)。
 //
 // Heap bitmap
+// 译：堆位图
 //
 // The heap bitmap comprises 1 bit for each pointer-sized word in the heap,
 // recording whether a pointer is stored in that word or not. This bitmap
@@ -24,6 +30,11 @@
 // Bits correspond to words in little-endian order. ha.bitmap[0]&1 represents
 // the word at "start", ha.bitmap[0]>>1&1 represents the word at start+8, etc.
 // (For 32-bit platforms, s/64/32/.)
+// 译：对于堆中的每个指针大小的字，堆位图包括1位，记录指针是否存储在该字中。
+// 译：该位图存储在支持每个堆区域的heapArena元数据中。
+// 译：也就是说，如果ha是从“start”开始的场景的heapArena，则ha.bitmap[0]保存64个单词“start”到start+63*ptrSize的64位，
+// 译：ha.bitmap[1]保存start+64*ptrSize到start+127*ptrSize的条目，依此类推。注：矩阵或多维数组
+// 译：位以小端顺序对应于字。Ha.bitmap[0]&1表示开始处的单词，ha.bitmap[0]>>1&1表示开始+8处的单词，依此类推(在32位平台，则s/64/32/.)。
 //
 // We also keep a noMorePtrs bitmap which allows us to stop scanning
 // the heap bitmap early in certain situations. If ha.noMorePtrs[i]>>j&1
@@ -31,11 +42,16 @@
 // has no more pointers beyond those described by ha.bitmap[8*i+j].
 // If ha.noMorePtrs[i]>>j&1 is set, the entries in ha.bitmap[8*i+j+1] and
 // beyond must all be zero until the start of the next object.
+// 译：我们还保留了一个noMorePtrs位图，它允许我们在某些情况下提前停止扫描堆位图。
+// 译：如果ha.noMorePtrs[i]>>j&1为1，则包含ha.bitmap[8*i+j]描述的最后一个单词的对象不再有ha.bitmap[8*i+j]描述的指针以外的指针。
+// 译：如果设置了ha.noMorePtrs[i]>>j&1，则ha.bitmap[8*i+j+1]及以后的条目必须全部为零，直到下一个对象开始。
 //
 // The bitmap for noscan spans is set to all zero at span allocation time.
+// 译：在span分配时，无指针span的位图被设置为全零。
 //
 // The bitmap for unallocated objects in scannable spans is not maintained
 // (can be junk).
+// 译：不维护可扫描范围中未分配对象的位图(可能是垃圾)。
 
 package runtime
 
@@ -117,8 +133,10 @@ func (s *mspan) allocBitsForIndex(allocBitIndex uintptr) markBits {
 // and negates them so that ctz (count trailing zeros) instructions
 // can be used. It then places these 8 bytes into the cached 64 bit
 // s.allocCache.
+// RefillAllocCache从WhichByte开始获取8个字节的s.allocBits，并取反它们，以便可以使用CTZ(计数尾随零)指令。
+// 然后，它将这8个字节放入缓存的64位s.allocCache中。
 func (s *mspan) refillAllocCache(whichByte uintptr) {
-	bytes := (*[8]uint8)(unsafe.Pointer(s.allocBits.bytep(whichByte)))
+	bytes := (*[8]uint8)(unsafe.Pointer(s.allocBits.bytep(whichByte))) // 取出下一个8byte
 	aCache := uint64(0)
 	aCache |= uint64(bytes[0])
 	aCache |= uint64(bytes[1]) << (1 * 8)
@@ -128,17 +146,20 @@ func (s *mspan) refillAllocCache(whichByte uintptr) {
 	aCache |= uint64(bytes[5]) << (5 * 8)
 	aCache |= uint64(bytes[6]) << (6 * 8)
 	aCache |= uint64(bytes[7]) << (7 * 8)
-	s.allocCache = ^aCache
+	s.allocCache = ^aCache // 拼装这一轮的位图，并取反
 }
 
 // nextFreeIndex returns the index of the next free object in s at
 // or after s.freeindex.
 // There are hardware instructions that can be used to make this
 // faster if profiling warrants it.
+// 译： nextFreeIndex返回S中位于s.freeindex或之后的下一个可用对象的索引。
+// 如果分析需要的话，可以使用硬件指令来加快这一过程。
 func (s *mspan) nextFreeIndex() uintptr {
 	sfreeindex := s.freeindex
 	snelems := s.nelems
 	if sfreeindex == snelems {
+		// 注：如果全部分配完毕，直接结束
 		return sfreeindex
 	}
 	if sfreeindex > snelems {
@@ -147,40 +168,46 @@ func (s *mspan) nextFreeIndex() uintptr {
 
 	aCache := s.allocCache
 
-	bitIndex := sys.TrailingZeros64(aCache)
-	for bitIndex == 64 {
+	bitIndex := sys.TrailingZeros64(aCache) // 注：取得allocCache尾数0的个数
+	for bitIndex == 64 {                    // 注：aCache为0，即全被分配，执行循环
 		// Move index to start of next cached bits.
-		sfreeindex = (sfreeindex + 64) &^ (64 - 1)
-		if sfreeindex >= snelems {
-			s.freeindex = snelems
+		sfreeindex = (sfreeindex + 64) &^ (64 - 1) // 注：对64向上取整，表示本轮分配完毕(因为位图最多64个，超过64个，每轮分配64个对象)
+		if sfreeindex >= snelems {                 // 注：s.freeindex不能超过snelems，如果超过则分配完毕
+			s.freeindex = snelems // 注：由于uint64仅能提供64位的位图，因此每轮仅能分配64个对象，但是snelems可能超过64
 			return snelems
 		}
-		whichByte := sfreeindex / 8
+		whichByte := sfreeindex / 8 // 注：每8byte为一组
 		// Refill s.allocCache with the next 64 alloc bits.
-		s.refillAllocCache(whichByte)
-		aCache = s.allocCache
+		s.refillAllocCache(whichByte) // 注：填充下一个64位的位图
+		aCache = s.allocCache         // 注：重新计算bitIndex
 		bitIndex = sys.TrailingZeros64(aCache)
 		// nothing available in cached bits
 		// grab the next 8 bytes and try again.
+		// 译：缓存位中没有可用的内容，请获取下一个8字节，然后重试。
 	}
-	result := sfreeindex + uintptr(bitIndex)
-	if result >= snelems {
+	result := sfreeindex + uintptr(bitIndex) // 注：指向已分配
+	if result >= snelems {                   // 注：超过总数，直接结束
 		s.freeindex = snelems
 		return snelems
 	}
 
-	s.allocCache >>= uint(bitIndex + 1)
-	sfreeindex = result + 1
+	s.allocCache >>= uint(bitIndex + 1) // 注：移除后侧的0，并获取将指针指向下一个
+	sfreeindex = result + 1             // 注：指向下一个空闲
 
-	if sfreeindex%64 == 0 && sfreeindex != snelems {
+	if sfreeindex%64 == 0 && sfreeindex != snelems { // 注：是64的倍数且和数量不等(+1产生的，不可能超过snelems，因此表示本次满了)
 		// We just incremented s.freeindex so it isn't 0.
 		// As each 1 in s.allocCache was encountered and used for allocation
 		// it was shifted away. At this point s.allocCache contains all 0s.
 		// Refill s.allocCache so that it corresponds
 		// to the bits at s.allocBits starting at s.freeindex.
-		whichByte := sfreeindex / 8
+		// 译：我们刚刚递增了s.freeindex，所以它不是0。
+		// 由于遇到s.allocCache中的每个1并将其用于分配，因此将其移开。
+		// 在这一点上，s.allocCache包含全0。
+		// 重新填充s.allocCache，使其与s.allocBits中从s.freeindex开始的位相对应。
+		whichByte := sfreeindex / 8 // 注：再次获取下一组位图
 		s.refillAllocCache(whichByte)
 	}
+	// 注：此处虽然将s.freeindex指向下一个空闲指针，但是将result返回，即已经分配完毕
 	s.freeindex = sfreeindex
 	return result
 }
@@ -235,12 +262,12 @@ func (s *mspan) markBitsForBase() markBits {
 }
 
 // isMarked reports whether mark bit m is set.
-func (m markBits) isMarked() bool {
+func (m markBits) isMarked() bool { // 注：是否黑色
 	return *m.bytep&m.mask != 0
 }
 
 // setMarked sets the marked bit in the markbits, atomically.
-func (m markBits) setMarked() {
+func (m markBits) setMarked() { // 注：标记为黑色
 	// Might be racing with other updates, so use atomic update always.
 	// We used to be clever here and use a non-atomic update in certain
 	// cases, but it's not worth the risk.
@@ -374,7 +401,7 @@ func reflect_verifyNotInHeapPtr(p uintptr) bool {
 	return spanOf(p) == nil && p != clobberdeadPtr
 }
 
-const ptrBits = 8 * goarch.PtrSize
+const ptrBits = 8 * goarch.PtrSize // 注：bitmap一个元素存储的指针个数，一个指针的位数(64位)
 
 // heapBits provides access to the bitmap bits for a single heap word.
 // The methods on heapBits take value receivers so that the compiler
@@ -719,11 +746,16 @@ func typeBitsBulkBarrier(typ *_type, dst, src, size uintptr) {
 // initHeapBits initializes the heap bitmap for a span.
 // If this is a span of single pointer allocations, it initializes all
 // words to pointer. If force is true, clears all bits.
+// 译：initHeapBits初始化span的堆位图。
+// 译：如果这是单指针分配的span，它会将所有字初始化为指针。
+// 译：如果force为True，则清除所有位。
 func (s *mspan) initHeapBits(forceClear bool) {
-	if forceClear || s.spanclass.noscan() {
+	if forceClear || s.spanclass.noscan() { // 注：强制清除或者不含指针
 		// Set all the pointer bits to zero. We do this once
 		// when the span is allocated so we don't have to do it
 		// for each object allocation.
+		// 译：将所有指针位设置为零。
+		// 译：我们在分配span时执行一次此操作，因此不必为每个对象分配执行此操作。
 		base := s.base()
 		size := s.npages * pageSize
 		h := writeHeapBitsForAddr(base)
@@ -764,22 +796,26 @@ func (s *mspan) countAlloc() int {
 }
 
 type writeHeapBits struct {
-	addr  uintptr // address that the low bit of mask represents the pointer state of.
-	mask  uintptr // some pointer bits starting at the address addr.
-	valid uintptr // number of bits in buf that are valid (including low)
-	low   uintptr // number of low-order bits to not overwrite
+	addr  uintptr // 译：掩码的低位表示其指针状态的地址。// address that the low bit of mask represents the pointer state of.
+	mask  uintptr // 译：从地址addr开始的一些指针位。// some pointer bits starting at the address addr.
+	valid uintptr // 译：BUF中有效的位数(包括low) // number of bits in buf that are valid (including low)
+	low   uintptr // 译：不覆盖的低位位数 // number of low-order bits to not overwrite
 }
 
 func writeHeapBitsForAddr(addr uintptr) (h writeHeapBits) {
 	// We start writing bits maybe in the middle of a heap bitmap word.
 	// Remember how many bits into the word we started, so we can be sure
 	// not to overwrite the previous bits.
-	h.low = addr / goarch.PtrSize % ptrBits
+	// 译：我们开始写入可能位于堆位图字中间的位。
+	// 译：记住我们开始的字中有多少位，这样我们就可以确保不会覆盖前面的位。
+	h.low = addr / goarch.PtrSize % ptrBits // 注：位图的左侧偏移量(一个位图是一个指针的位数64)
 
 	// round down to heap word that starts the bitmap word.
-	h.addr = addr - h.low*goarch.PtrSize
+	// 译：向下舍入到开始位图字的堆字。
+	h.addr = addr - h.low*goarch.PtrSize // 注：位图索引
 
 	// We don't have any bits yet.
+	// 译：我们还没有任何位。
 	h.mask = 0
 	h.valid = h.low
 
@@ -788,27 +824,30 @@ func writeHeapBitsForAddr(addr uintptr) (h writeHeapBits) {
 
 // write appends the pointerness of the next valid pointer slots
 // using the low valid bits of bits. 1=pointer, 0=scalar.
+// 译：write使用位的低位有效位附加下一个有效指针槽的位置。1=指针，0=标量。
 func (h writeHeapBits) write(bits, valid uintptr) writeHeapBits {
-	if h.valid+valid <= ptrBits {
+	if h.valid+valid <= ptrBits { // 注：没有超过一个位图
 		// Fast path - just accumulate the bits.
-		h.mask |= bits << h.valid
+		// 译：快速路径-只需积累比特即可。
+		h.mask |= bits << h.valid // 由于gcdata是从右往左记录，因此可以直接左移
 		h.valid += valid
 		return h
 	}
 	// Too many bits to fit in this word. Write the current word
 	// out and move on to the next word.
+	// 译：此字的位数太多，无法容纳。把当前单词写出来，然后转到下一个单词。
 
-	data := h.mask | bits<<h.valid       // mask for this word
-	h.mask = bits >> (ptrBits - h.valid) // leftover for next word
-	h.valid += valid - ptrBits           // have h.valid+valid bits, writing ptrBits of them
+	data := h.mask | bits<<h.valid       // 译：当前词的掩码 注：bits会向左溢出h.valid位 // mask for this word
+	h.mask = bits >> (ptrBits - h.valid) // 译：留下下一个词的剩余 注：bits溢出的部分留下 // leftover for next word
+	h.valid += valid - ptrBits           // 注：对齐到下一个位图 // have h.valid+valid bits, writing ptrBits of them
 
 	// Flush mask to the memory bitmap.
 	// TODO: figure out how to cache arena lookup.
 	ai := arenaIndex(h.addr)
-	ha := mheap_.arenas[ai.l1()][ai.l2()]
-	idx := h.addr / (ptrBits * goarch.PtrSize) % heapArenaBitmapWords
-	m := uintptr(1)<<h.low - 1
-	ha.bitmap[idx] = ha.bitmap[idx]&m | data
+	ha := mheap_.arenas[ai.l1()][ai.l2()]                             // 注：获取所在的arena
+	idx := h.addr / (ptrBits * goarch.PtrSize) % heapArenaBitmapWords // 注：取得bitmap的索引
+	m := uintptr(1)<<h.low - 1                                        // 注：位图中其他词，由于超过一个位图，剩余空间全部属于当前对象
+	ha.bitmap[idx] = ha.bitmap[idx]&m | data                          // 注：写入位图数据
 	// Note: no synchronization required for this write because
 	// the allocator has exclusive access to the page, and the bitmap
 	// entries are all for a single page. Also, visibility of these
@@ -816,11 +855,11 @@ func (h writeHeapBits) write(bits, valid uintptr) writeHeapBits {
 
 	// Clear noMorePtrs bit, since we're going to be writing bits
 	// into the following word.
-	ha.noMorePtrs[idx/8] &^= uint8(1) << (idx % 8)
+	ha.noMorePtrs[idx/8] &^= uint8(1) << (idx % 8) // 清除对应的noMorePtrs位图
 	// Note: same as above
 
 	// Move to next word of bitmap.
-	h.addr += ptrBits * goarch.PtrSize
+	h.addr += ptrBits * goarch.PtrSize // 地址前进，取得下一个位图
 	h.low = 0
 	return h
 }
@@ -840,13 +879,16 @@ func (h writeHeapBits) pad(size uintptr) writeHeapBits {
 
 // Flush the bits that have been written, and add zeros as needed
 // to cover the full object [addr, addr+size).
+// 译：刷新已写入的位，并根据需要添加零以覆盖完整对象[addr，addr+Size]。
 func (h writeHeapBits) flush(addr, size uintptr) {
 	// zeros counts the number of bits needed to represent the object minus the
 	// number of bits we've already written. This is the number of 0 bits
 	// that need to be added.
+	// 译：零计算表示对象所需的位数减去我们已经写入的位数。这是需要添加的0位的数量。
 	zeros := (addr+size-h.addr)/goarch.PtrSize - h.valid
 
 	// Add zero bits up to the bitmap word boundary
+	// 译：将零比特添加到位图字边界
 	if zeros > 0 {
 		z := ptrBits - h.valid
 		if z > zeros {
@@ -873,7 +915,9 @@ func (h writeHeapBits) flush(addr, size uintptr) {
 
 	// Record in the noMorePtrs map that there won't be any more 1 bits,
 	// so readers can stop early.
-	ha.noMorePtrs[idx/8] |= uint8(1) << (idx % 8)
+	// 译：在noMorePtrs映射中记录不会再有1位，这样读者就可以提前停止阅读。
+	// 注：如果填充完bitmap后依然有剩余，则表示当前bitmap完全由当前对象持有，因此标记为noMorePtrs
+	ha.noMorePtrs[idx/8] |= uint8(1) << (idx % 8) // 注：标记位图的noMorePtrs
 
 	// Advance to next bitmap word.
 	h.addr += ptrBits * goarch.PtrSize
@@ -898,7 +942,7 @@ func (h writeHeapBits) flush(addr, size uintptr) {
 			ha.bitmap[idx] = 0
 			zeros -= ptrBits
 		}
-		ha.noMorePtrs[idx/8] |= uint8(1) << (idx % 8)
+		ha.noMorePtrs[idx/8] |= uint8(1) << (idx % 8) // 注：标记位图的noMorePtrs
 		h.addr += ptrBits * goarch.PtrSize
 	}
 }
@@ -921,15 +965,21 @@ func readUintptr(p *byte) uintptr {
 // (The number of values is given by dataSize / typ.size.)
 // If dataSize < size, the fragment [x+dataSize, x+size) is
 // recorded as non-pointer data.
+// 译：heapBitsSetType记录新的分配[x，x+Size)在[x，x+dataSize)中保存一个或多个类型为Typ的值。(值的数量由dataSize/ty.size给出。)
+// 译：如果dataSize<Size，则片段[x+dataSize，x+Size)被记录为非指针数据。
 // It is known that the type has pointers somewhere;
 // malloc does not call heapBitsSetType when there are no pointers,
 // because all free objects are marked as noscan during
 // heapBitsSweepSpan.
+// 译：众所周知，该类型在某个地方有指针；当没有指针时，malloc不会调用heapBitsSetType，
+// 译：因为在heapBitsSweepSpan期间，所有空闲对象都被标记为noscan。
 //
 // There can only be one allocation from a given span active at a time,
 // and the bitmap for a span always falls on word boundaries,
 // so there are no write-write races for access to the heap bitmap.
 // Hence, heapBitsSetType can access the bitmap without atomics.
+// 译：一次只能有一个来自给定span的分配处于活动状态，并且span的位图始终落在字边界上，因此不存在访问堆位图的写-写竞争。
+// 译：因此，heapBitsSetType可以在没有原子的情况下访问位图。
 //
 // There can be read-write races between heapBitsSetType and things
 // that read the heap bitmap like scanobject. However, since
@@ -939,6 +989,10 @@ func readUintptr(p *byte) uintptr {
 // bits that belong to neighboring objects. Also, on weakly-ordered
 // machines, callers must execute a store/store (publication) barrier
 // between calling this function and making the object reachable.
+// 译：heapBitsSetType和读取堆位图的对象(如scanObject)之间可能存在读写竞争。
+// 译：但是，由于heapBitsSetType仅用于尚未设置为可访问的对象，因此读取器将忽略此函数修改的位。
+// 译：这确实意味着该函数不能瞬时修改属于相邻对象的位。
+// 译：此外，在弱有序机器上，调用者必须在调用此函数和使对象可访问之间执行存储/存储(发布)屏障。
 func heapBitsSetType(x, size, dataSize uintptr, typ *_type) {
 	const doubleCheck = false // slow but helpful; enable to test modifications to this code
 
@@ -952,6 +1006,9 @@ func heapBitsSetType(x, size, dataSize uintptr, typ *_type) {
 		// (non-pointers are aggregated into tinySize allocations),
 		// (*mspan).initHeapBits sets the pointer bits for us.
 		// Nothing to do here.
+		// 译：这是一个词，而且它有指针，它一定是一个指针。
+		// 译：由于所有分配的单字对象都是指针(非指针被聚合到tinySize分配中)，(*mspan).initHeapBits为我们设置指针位。
+		// 译：在这里没什么可做的。
 		if doubleCheck {
 			h, addr := heapBitsForAddr(x, size).next()
 			if addr != x {
@@ -968,8 +1025,10 @@ func heapBitsSetType(x, size, dataSize uintptr, typ *_type) {
 	h := writeHeapBitsForAddr(x)
 
 	// Handle GC program.
+	// 译：处理GC程序。
 	if typ.kind&kindGCProg != 0 {
 		// Expand the gc program into the storage we're going to use for the actual object.
+		// 译：将GC程序展开到我们将用于实际对象的存储中。
 		obj := (*uint8)(unsafe.Pointer(x))
 		n := runGCProg(addb(typ.gcdata, 4), obj)
 		// Use the expanded program to set the heap bits.
@@ -1000,86 +1059,103 @@ func heapBitsSetType(x, size, dataSize uintptr, typ *_type) {
 	}
 
 	// Note about sizes:
+	// 译：关于大小的注意：
 	//
 	// typ.size is the number of words in the object,
 	// and typ.ptrdata is the number of words in the prefix
 	// of the object that contains pointers. That is, the final
 	// typ.size - typ.ptrdata words contain no pointers.
+	// 译：typ.size是对象中的单词数，ty.ptrdata是对象的前缀中包含指针的单词数。
+	// 译：也就是说，最终的typ.size-typ.ptrdata单词不包含指针。
 	// This allows optimization of a common pattern where
 	// an object has a small header followed by a large scalar
 	// buffer. If we know the pointers are over, we don't have
 	// to scan the buffer's heap bitmap at all.
+	// 译：这允许对常见模式进行优化，其中对象具有较小的头部，后跟较大的标量缓冲区
+	// 译：如果我们知道指针已经结束，我们根本不需要扫描缓冲区的堆位图
 	// The 1-bit ptrmasks are sized to contain only bits for
 	// the typ.ptrdata prefix, zero padded out to a full byte
 	// of bitmap. If there is more room in the allocated object,
 	// that space is pointerless. The noMorePtrs bitmap will prevent
 	// scanning large pointerless tails of an object.
+	// 译：1位ptrmasks的大小被设置为仅包含typ.ptrdata前缀的位，位图的整个字节被零填充。
+	// 译：如果分配的对象中有更多空间，则该空间是无指针的。
+	// 译：noMorePtrs位图将防止扫描对象的大而无指针的尾部
 	//
 	// Replicated copies are not as nice: if there is an array of
 	// objects with scalar tails, all but the last tail does have to
 	// be initialized, because there is no way to say "skip forward".
+	// 译：复制的副本就没有那么好了：如果有一个对象数组带有标量尾巴，
+	// 译：那么除了最后一个尾巴之外，所有的对象都必须初始化，因为没有办法说“向前跳过”。
 
-	ptrs := typ.ptrdata / goarch.PtrSize
-	if typ.size == dataSize { // Single element
+	ptrs := typ.ptrdata / goarch.PtrSize // 注：最后一个指针元素的索引+1，超过则不存在指针
+	if typ.size == dataSize {            // Single element
+		// 注：类型大小和元素大小一致，则为单一元素
 		if ptrs <= ptrBits { // Single small element
+			// 注：小对象
 			m := readUintptr(typ.gcdata)
-			h = h.write(m, ptrs)
+			h = h.write(m, ptrs) // 注：直接写入位图
 		} else { // Single large element
 			p := typ.gcdata
 			for {
-				h = h.write(readUintptr(p), ptrBits)
-				p = addb(p, ptrBits/8)
+				h = h.write(readUintptr(p), ptrBits) // 注：一次写入一个位图的数据, 一次最多64
+				p = addb(p, ptrBits/8)               // 注：gcdata前进一个位图的数据
 				ptrs -= ptrBits
-				if ptrs <= ptrBits {
+				if ptrs <= ptrBits { // 注：不足一个位图结束
 					break
 				}
 			}
 			m := readUintptr(p)
-			h = h.write(m, ptrs)
+			h = h.write(m, ptrs) // 注：写入剩余位图数据
 		}
 	} else { // Repeated element
-		words := typ.size / goarch.PtrSize // total words, including scalar tail
+		// 注：多元素处理
+		words := typ.size / goarch.PtrSize // 译：总字数，包括标量尾数 // total words, including scalar tail
 		if words <= ptrBits {              // Repeated small element
-			n := dataSize / typ.size
+			// 注：小对象处理，小于64个指针大小
+			n := dataSize / typ.size // 注：元素个数
 			m := readUintptr(typ.gcdata)
 			// Make larger unit to repeat
-			for words <= ptrBits/2 {
-				if n&1 != 0 {
-					h = h.write(m, words)
+			for words <= ptrBits/2 { // 注：少于32个词
+				if n&1 != 0 { // 注：奇数处理
+					h = h.write(m, words) // 注：先写入舍弃元素(后面折半)
 				}
+				// 注：拼装为大元素处理，结构复制
 				n /= 2
 				m |= m << words
 				ptrs += words
-				words *= 2
-				if n == 1 {
+				words *= 2  // 注：总字数翻倍
+				if n == 1 { // 注：仅剩一个元素，结束
 					break
 				}
 			}
-			for n > 1 {
+			for n > 1 { // 注：超过一个元素，循环写入
 				h = h.write(m, words)
 				n--
 			}
-			h = h.write(m, ptrs)
+			h = h.write(m, ptrs) // 注：写入剩余位图数据
 		} else { // Repeated large element
+			// 注：大元素处理
 			for i := uintptr(0); true; i += typ.size {
 				p := typ.gcdata
 				j := ptrs
-				for j > ptrBits {
+				for j > ptrBits { // 注：一个位图一个位图，逐一写入
 					h = h.write(readUintptr(p), ptrBits)
 					p = addb(p, ptrBits/8)
 					j -= ptrBits
 				}
 				m := readUintptr(p)
-				h = h.write(m, j)
+				h = h.write(m, j) // 注：写入剩余位图数据
 				if i+typ.size == dataSize {
-					break // don't need the trailing nonptr bits on the last element.
+					break // 译：在最后一个元素上不需要尾随的非ptr位。// don't need the trailing nonptr bits on the last element.
 				}
 				// Pad with zeros to the start of the next element.
+				// 译：用零填充到下一个元素的开头。
 				h = h.pad(typ.size - typ.ptrdata)
 			}
 		}
 	}
-	h.flush(x, size)
+	h.flush(x, size) // 注：将未保存位图保存，并将剩余未写入位图归0，同时写入noMorePtrs
 
 	if doubleCheck {
 		h := heapBitsForAddr(x, size)

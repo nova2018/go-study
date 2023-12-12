@@ -154,7 +154,7 @@ func gcinit() {
 		throw("size of Workbuf is suboptimal")
 	}
 	// No sweep on the first cycle.
-	sweep.active.state.Store(sweepDrainedMask)
+	sweep.active.state.Store(sweepDrainedMask) // 注：第一轮sweep状态
 
 	// Initialize GC pacer state.
 	// Use the environment variable GOGC for the initial gcPercent value.
@@ -201,12 +201,15 @@ var writeBarrier struct {
 // gcBlackenEnabled is 1 if mutator assists and background mark
 // workers are allowed to blacken objects. This must only be set when
 // gcphase == _GCmark.
+// 如果允许Mutator助手和背景标记工作人员将对象变黑，则gcBlackenEnabled为1
+// 这必须仅在gcase==_GCmark时设置。
 var gcBlackenEnabled uint32
 
 const (
-	_GCoff             = iota // GC not running; sweeping in background, write barrier disabled
-	_GCmark                   // GC marking roots and workbufs: allocate black, write barrier ENABLED
-	_GCmarktermination        // GC mark termination: allocate black, P's help GC, write barrier ENABLED
+	_GCoff = iota // GC not running; sweeping in background, write barrier disabled
+	// GC标记根目录和工作区：分配黑色，启用写屏障
+	_GCmark            // GC marking roots and workbufs: allocate black, write barrier ENABLED
+	_GCmarktermination // GC mark termination: allocate black, P's help GC, write barrier ENABLED
 )
 
 //go:nosplit
@@ -528,6 +531,7 @@ const (
 	// gcTriggerHeap indicates that a cycle should be started when
 	// the heap size reaches the trigger heap size computed by the
 	// controller.
+	// 译：gcTriggerHeap表示当堆大小达到控制器计算的触发器堆大小时应该开始一个周期。
 	gcTriggerHeap gcTriggerKind = iota
 
 	// gcTriggerTime indicates that a cycle should be started when

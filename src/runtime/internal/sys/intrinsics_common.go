@@ -52,6 +52,7 @@ const m1 = 0x3333333333333333 // 00110011 ...
 const m2 = 0x0f0f0f0f0f0f0f0f // 00001111 ...
 
 // OnesCount64 returns the number of one bits ("population count") in x.
+// 计算1的个数
 func OnesCount64(x uint64) int {
 	// Implementation: Parallel summing of adjacent bits.
 	// See "Hacker's Delight", Chap. 5: Counting Bits.
@@ -72,6 +73,8 @@ func OnesCount64(x uint64) int {
 	// Per "Hacker's Delight", the first line can be simplified
 	// more, but it saves at best one instruction, so we leave
 	// it alone for clarity.
+	// 注：参考这篇文章：https://zhuanlan.zhihu.com/p/521457962
+	// 注：第一步，将数字两两一组，拆分成32组，错位相加，第二步，将32组的数字相加，即可得到1的个数
 	const m = 1<<64 - 1
 	x = x>>1&(m0&m) + x&(m0&m)
 	x = x>>2&(m1&m) + x&(m1&m)

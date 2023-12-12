@@ -316,7 +316,7 @@ const (
 // rtype must be kept in sync with ../runtime/type.go:/^type._type.
 type rtype struct {
 	size       uintptr
-	ptrdata    uintptr // number of bytes in the type that can contain pointers
+	ptrdata    uintptr // 译：类型中可以包含指针的字节数 // number of bytes in the type that can contain pointers
 	hash       uint32  // hash of type; avoids computation in hash tables
 	tflag      tflag   // extra type information flags
 	align      uint8   // alignment of variable with this type

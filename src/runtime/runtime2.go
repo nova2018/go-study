@@ -502,6 +502,12 @@ type g struct {
 	// scan work. We track this in bytes to make it fast to update
 	// and check for debt in the malloc hot path. The assist ratio
 	// determines how this corresponds to scan work debt.
+	//
+	// GcAssistBytes是此G的GC辅助信用(以分配的字节为单位)。
+	// 如果这是正的，则G具有在不辅助的情况下分配gcAssistBytes字节的信用。
+	// 如果这是负的，则G必须通过执行扫描工作来纠正这一点。
+	// 我们以字节为单位进行跟踪，以便快速更新和检查Malloc热路径中的债务。
+	// 协助比率决定了这与扫描工作债务的对应方式。
 	gcAssistBytes int64
 }
 

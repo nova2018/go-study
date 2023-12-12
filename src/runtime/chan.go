@@ -25,7 +25,11 @@ import (
 )
 
 const (
-	maxAlign  = 8
+	maxAlign = 8
+	// 内存对齐，保证为8的倍数
+	// 令x=unsafe.SizeOf(hchan{}), 则hchanSize = x + (-x) & (0b0111)
+	// 将x=hi+lo 则hchanSize = hi + lo + (-(hi+lo)) & 0b0111 = hi + lo + (-lo)
+	// hchanSize = hi + (lo > 0 ? 0b1000 : 0)
 	hchanSize = unsafe.Sizeof(hchan{}) + uintptr(-int(unsafe.Sizeof(hchan{}))&(maxAlign-1))
 	debugChan = false
 )

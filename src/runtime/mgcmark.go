@@ -1556,8 +1556,10 @@ func gcDumpObject(label string, obj, off uintptr) {
 
 // gcmarknewobject marks a newly allocated object black. obj must
 // not contain any non-nil pointers.
+// 译：gcmarknewobject将新分配的对象标记为黑色。obj不能包含任何非零指针。
 //
 // This is nosplit so it can manipulate a gcWork without preemption.
+// 译：这是不分割的，因此它可以在不被抢占的情况下操作gcWork。
 //
 //go:nowritebarrier
 //go:nosplit
@@ -1568,11 +1570,11 @@ func gcmarknewobject(span *mspan, obj, size uintptr) {
 
 	// Mark object.
 	objIndex := span.objIndex(obj)
-	span.markBitsForIndex(objIndex).setMarked()
+	span.markBitsForIndex(objIndex).setMarked() // 注：标记为黑色，此时对象内全部数据均为空，因此不需要标记灰
 
 	// Mark span.
 	arena, pageIdx, pageMask := pageIndexOf(span.base())
-	if arena.pageMarks[pageIdx]&pageMask == 0 {
+	if arena.pageMarks[pageIdx]&pageMask == 0 { // 注：如果span没有标记为黑色，则标记为黑色
 		atomic.Or8(&arena.pageMarks[pageIdx], pageMask)
 	}
 

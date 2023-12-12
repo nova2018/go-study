@@ -16,13 +16,15 @@ TEXT runtime·memclrNoHeapPointers<ABIInternal>(SB), NOSPLIT, $0-16
 	// AX = ptr
 	// BX = n
 	MOVQ	AX, DI	// DI = ptr
-	XORQ	AX, AX
+	XORQ	AX, AX // 注：此处将AX清零
 
 	// MOVOU seems always faster than REP STOSQ when Enhanced REP STOSQ is not available.
+	// 译：当增强的REP STOSQ不可用时，MOVOU似乎总是比REP STOSQ更快
 tail:
 	// BSR+branch table make almost all memmove/memclr benchmarks worse. Not worth doing.
-	TESTQ	BX, BX
-	JEQ	_0
+	// 译：BSR+branch table使得几乎所有的MemMove/Memclr性能测试都变得更糟。不值得去做。
+	TESTQ	BX, BX // 注：BX&BX 4字节按位与
+	JEQ	_0 // 注：BX=0时跳转
 	CMPQ	BX, $2
 	JBE	_1or2
 	CMPQ	BX, $4

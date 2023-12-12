@@ -67,7 +67,7 @@ type mheap struct {
 
 	pages pageAlloc // page allocation data structure
 
-	sweepgen uint32 // sweep generation, see comment in mspan; written during STW
+	sweepgen uint32 // 清扫器生成吗，参考mspan的注释, STW时写入 // sweep generation, see comment in mspan; written during STW
 
 	// allspans is a slice of all mspans ever created. Each mspan
 	// appears exactly once.
@@ -142,7 +142,7 @@ type mheap struct {
 	// platforms (even 64-bit), arenaL1Bits is 0, making this
 	// effectively a single-level map. In this case, arenas[0]
 	// will never be nil.
-	arenas [1 << arenaL1Bits]*[1 << arenaL2Bits]*heapArena
+	arenas [1 << arenaL1Bits]*[1 << arenaL2Bits]*heapArena // 注：arenas=[1]*[1<<22]*heapArena
 
 	// heapArenaAlloc is pre-reserved space for allocating heapArena
 	// objects. This is only used on 32-bit, where we pre-reserve
@@ -235,7 +235,7 @@ type heapArena struct {
 	// bitmap stores the pointer/scalar bitmap for the words in
 	// this arena. See mbitmap.go for a description.
 	// This array uses 1 bit per word of heap, or 1.6% of the heap size (for 64-bit).
-	bitmap [heapArenaBitmapWords]uintptr
+	bitmap [heapArenaBitmapWords]uintptr // 注：一个元素管理64个指针，因此一个bitmap管理 1<<17*64 = 1<<17<<6=1<<23=8M个地址。一个地址8字节，因此一共64M空间
 
 	// If the ith bit of noMorePtrs is true, then there are no more
 	// pointers for the object containing the word described by the
@@ -248,7 +248,12 @@ type heapArena struct {
 	// represents 8K of memory, the minimum size of a span. Any larger
 	// and we'd have to worry about concurrent updates.
 	// This array uses 1 bit per word of bitmap, or .024% of the heap size (for 64-bit).
-	noMorePtrs [heapArenaBitmapWords / 8]uint8
+	// 译：如果noMorePtrs的第i位为真，则不再有指向包含由bitmap[i]的高位描述的字的对象的指针。
+	// 译：在这种情况下，位图[i+1]，... 在下一个对象开始之前必须为零。
+	// 译：我们从来不使用位并行技术对这些条目进行操作，所以如果它们很小也没问题。
+	// 译：此外，它们不能大于uint16，因为在该大小下，单个noMorePtrs条目代表8K的内存，这是一个span的最小大小。
+	// 译：再大一点，我们就不得不担心并发更新了。此数组使bitmap的每个字1位，或堆大小的0.024%(对于64位)。
+	noMorePtrs [heapArenaBitmapWords / 8]uint8 // 注：noMorePtrs每个元素的每一位代表一个位图元素，一位表示一个mspan？
 
 	// spans maps from virtual address page ID within this arena to *mspan.
 	// For allocated spans, their pages map to the span itself.
@@ -274,17 +279,24 @@ type heapArena struct {
 	// pageMarks is a bitmap that indicates which spans have any
 	// marked objects on them. Like pageInUse, only the bit
 	// corresponding to the first page in each span is used.
+	// 译：PageMarks是一个位图，它指示哪些span上有任何标记的对象。
+	// 译：与pageInUse类似，只使用与每个span中的第一页对应的位。
 	//
 	// Writes are done atomically during marking. Reads are
 	// non-atomic and lock-free since they only occur during
 	// sweeping (and hence never race with writes).
+	// 译：在标记期间以原子方式进行写入。
+	// 译：读取是非原子的且无锁，因为它们只在清理期间发生(因此不会与写入竞争)。
 	//
 	// This is used to quickly find whole spans that can be freed.
+	// 译：这用于快速查找可以释放的整个跨度。
 	//
 	// TODO(austin): It would be nice if this was uint64 for
 	// faster scanning, but we don't have 64-bit atomic bit
 	// operations.
-	pageMarks [pagesPerArena / 8]uint8
+	// 译：与pageInUse类似，只使用与每个范围中的第一页对应的位。在标记期间以原子方式进行写入。读取是非原子的且无锁，因为它们只在清理期间发生(因此不会与写入竞争)。
+	// 译：TODO(奥斯汀)：如果这是uint64就好了，这样扫描速度更快，但我们没有64位原子位操作。
+	pageMarks [pagesPerArena / 8]uint8 // 注：一位表示一个span有黑色对象
 
 	// pageSpecials is a bitmap that indicates which spans have
 	// specials (finalizers or other). Like pageInUse, only the bit
@@ -404,34 +416,43 @@ type mSpanList struct {
 
 type mspan struct {
 	_    sys.NotInHeap
-	next *mspan     // next span in list, or nil if none
-	prev *mspan     // previous span in list, or nil if none
+	next *mspan     // 译：next span链表, 不存在为空 // next span in list, or nil if none
+	prev *mspan     // 译：previous span链表, 不存在为空 // previous span in list, or nil if none
 	list *mSpanList // For debugging. TODO: Remove.
 
-	startAddr uintptr // address of first byte of span aka s.base()
-	npages    uintptr // number of pages in span
+	startAddr uintptr // 译：span的首地址 // address of first byte of span aka s.base()
+	npages    uintptr // 译：span中页的数量 // number of pages in span
 
 	manualFreeList gclinkptr // list of free objects in mSpanManual spans
 
 	// freeindex is the slot index between 0 and nelems at which to begin scanning
 	// for the next free object in this span.
+	// 译：freeIndex是介于0和nelem之间的槽索引，从该位置开始扫描此范围内的下一个空闲对象
 	// Each allocation scans allocBits starting at freeindex until it encounters a 0
 	// indicating a free object. freeindex is then adjusted so that subsequent scans begin
 	// just past the newly discovered free object.
+	// 译：每次分配都会从freeIndex开始扫描allocBits，直到遇到表示空闲对象的0
+	// 然后调整freeIndex，以便后续扫描正好在新发现的空闲对象之后开始
 	//
 	// If freeindex == nelem, this span has no free objects.
+	// 译：如果freeIndex==nelem，则此范围没有空闲对象
 	//
 	// allocBits is a bitmap of objects in this span.
 	// If n >= freeindex and allocBits[n/8] & (1<<(n%8)) is 0
 	// then object n is free;
 	// otherwise, object n is allocated. Bits starting at nelem are
 	// undefined and should never be referenced.
+	// allocBits是此范围内对象的位图
+	// 译：如果n>=freeIndex并且allocBits[n/8]&(1<<(n%8))=0，则对象n是空闲的；否则，对象n已经被分配
+	// 从nelem开始的位是未定义的，永远不应该引用
 	//
 	// Object n starts at address n*elemsize + (start << pageShift).
+	// 译：对象n从地址 n*elemSize+(start<<pageShift)开始。
 	freeindex uintptr
 	// TODO: Look up nelems from sizeclass and remove this field if it
 	// helps performance.
-	nelems uintptr // number of object in the span.
+	// todo: 从sizeclass中查找nelems，如果有助于提高性能，请删除此字段。
+	nelems uintptr // span中的对象数量 // number of object in the span.
 
 	// Cache of the allocBits at freeindex. allocCache is shifted
 	// such that the lowest bit corresponds to the bit freeindex.
@@ -439,53 +460,76 @@ type mspan struct {
 	// ctz (count trailing zero) to use it directly.
 	// allocCache may contain bits beyond s.nelems; the caller must ignore
 	// these.
+	// 译：在freeindex处的allocBits的缓存。
+	// 对allocCache进行移位，使得最低位对应于位空闲索引。
+	// AllocCache持有allocBits的反码，因此允许CTZ(计数尾随零)直接使用它。
+	// AllocCache可能包含s.nelems以外的位；调用方必须忽略这些位。
 	allocCache uint64
 
 	// allocBits and gcmarkBits hold pointers to a span's mark and
 	// allocation bits. The pointers are 8 byte aligned.
+	// allocBits和gcmarkBits保存指向范围的标记位和分配位的指针。指针是8字节对齐的
 	// There are three arenas where this data is held.
+	// 有三个场景保存着这些数据
 	// free: Dirty arenas that are no longer accessed
 	//       and can be reused.
+	// free：脏的场景不再被访问，可以重复使用
 	// next: Holds information to be used in the next GC cycle.
+	// Next：保存要在下一个GC周期中使用的信息
 	// current: Information being used during this GC cycle.
+	// Next：在此GC周期中使用的信息
 	// previous: Information being used during the last GC cycle.
+	// previous：上一次GC周期中使用的信息
 	// A new GC cycle starts with the call to finishsweep_m.
 	// finishsweep_m moves the previous arena to the free arena,
 	// the current arena to the previous arena, and
 	// the next arena to the current arena.
+	// 新的GC循环从调用finishSweep_m开始，finishSweep_m将previous场景移动到free场景，
+	// 将current场景移动到previous场景，并将next场景移动到current场景
 	// The next arena is populated as the spans request
 	// memory to hold gcmarkBits for the next GC cycle as well
 	// as allocBits for newly allocated spans.
+	// 当span请求内存为下一个GC周期保存gcmarkBits以及为新分配的span分配allocBits时，将填充next场景
 	//
 	// The pointer arithmetic is done "by hand" instead of using
 	// arrays to avoid bounds checks along critical performance
 	// paths.
+	// 指针运算是“手动”完成的，而不是使用数组来避免关键性能路径上的边界检查
 	// The sweep will free the old allocBits and set allocBits to the
 	// gcmarkBits. The gcmarkBits are replaced with a fresh zeroed
 	// out memory.
-	allocBits  *gcBits
-	gcmarkBits *gcBits
+	// 扫描将释放旧的allocBits并将allocBits设置为gcmarkBits。gcmarkBits被新的清零内存所取代。
+	allocBits  *gcBits // 注：记录每一个内存块空闲与否
+	gcmarkBits *gcBits // 注：三色标记法的黑色标记？
 
 	// sweep generation:
+	// 清扫器生成
 	// if sweepgen == h->sweepgen - 2, the span needs sweeping
 	// if sweepgen == h->sweepgen - 1, the span is currently being swept
 	// if sweepgen == h->sweepgen, the span is swept and ready to use
 	// if sweepgen == h->sweepgen + 1, the span was cached before sweep began and is still cached, and needs sweeping
 	// if sweepgen == h->sweepgen + 3, the span was swept and then cached and is still cached
 	// h->sweepgen is incremented by 2 after every GC
+	//
+	// 译：如果sweepgen=h->sweepgen-2，span需要扫描
+	// 译：如果sweepgen=h->sweepgen-1，span正在被扫描
+	// 译：如果sweepgen=h->sweepgen, span已经被清扫，随时可用
+	// 译：如果sweepgen=h->sweepgen+1, span在扫描开始之前就在mcache，并且仍在mcache，需要进行清扫
+	// 译：如果sweepgen=h->sweepgen+3, span已经被清扫，然后进行mcache，并且仍在mcache中
+	// 译：h->sweepgen 每次gc自增2
 
 	sweepgen              uint32
 	divMul                uint32        // for divide by elemsize
-	allocCount            uint16        // number of allocated objects
+	allocCount            uint16        // 译：已分配的对象数量 // number of allocated objects
 	spanclass             spanClass     // size class and noscan (uint8)
 	state                 mSpanStateBox // mSpanInUse etc; accessed atomically (get/set methods)
-	needzero              uint8         // needs to be zeroed before allocation
-	isUserArenaChunk      bool          // whether or not this span represents a user arena
-	allocCountBeforeCache uint16        // a copy of allocCount that is stored just before this span is cached
+	needzero              uint8         // 译：在分配之前需要将其归零 // needs to be zeroed before allocation
+	isUserArenaChunk      bool          // 译：无论这个span是否代表一个用户领域 // whether or not this span represents a user arena
+	allocCountBeforeCache uint16        // 译：恰好在缓存此范围之前存储的allocCount的副本 // a copy of allocCount that is stored just before this span is cached
 	elemsize              uintptr       // computed from sizeclass or from npages
-	limit                 uintptr       // end of data in span
+	limit                 uintptr       // 译：span的结束指针 // end of data in span
 	speciallock           mutex         // guards specials list
-	specials              *special      // linked list of special records sorted by offset.
+	specials              *special      // 译：按偏移量排序的特殊记录的链接列表 // linked list of special records sorted by offset.
 	userArenaChunkFree    addrRange     // interval for managing chunk allocation
 
 	// freeIndexForScan is like freeindex, except that freeindex is
@@ -494,6 +538,9 @@ type mspan struct {
 	// is allocated only when the object and the heap bits are
 	// initialized (see also the assignment of freeIndexForScan in
 	// mallocgc, and issue 54596).
+	// 译：freeIndexForScan类似于freeindex，不同之处在于freeindex由分配器使用，而freeindexForScan由GC扫描器使用。
+	// 译：它们是两个字段，因此只有在对象和堆位被初始化时，GC才会看到对象被分配
+	// 译：(另请参阅在mallocgc中对freeIndexForScan的赋值和issue 54596)。
 	freeIndexForScan uintptr
 }
 
@@ -942,11 +989,14 @@ func (s spanAllocType) manual() bool {
 }
 
 // alloc allocates a new span of npage pages from the GC'd heap.
+// 译：alloc从GC堆中分配新范围的npage页面。
 //
 // spanclass indicates the span's size class and scannability.
+// 译：spanclass指示范围的大小、类和可扫描性。
 //
 // Returns a span that has been fully initialized. span.needzero indicates
 // whether the span has been zeroed. Note that it may not be.
+// 译：返回已完全初始化的范围。span.needzero指示span是否已归零。请注意，情况可能并非如此。
 func (h *mheap) alloc(npages uintptr, spanclass spanClass) *mspan {
 	// Don't do any operations that lock the heap on the G stack.
 	// It might trigger stack growth, and the stack growth code needs
@@ -955,7 +1005,7 @@ func (h *mheap) alloc(npages uintptr, spanclass spanClass) *mspan {
 	systemstack(func() {
 		// To prevent excessive heap growth, before allocating n pages
 		// we need to sweep and reclaim at least n pages.
-		if !isSweepDone() {
+		if !isSweepDone() { // 注：清扫任务未结束
 			h.reclaim(npages)
 		}
 		s = h.allocSpan(npages, spanAllocHeap, spanclass)
@@ -2106,11 +2156,13 @@ func (b *gcBitsArena) tryAlloc(bytes uintptr) *gcBits {
 
 // newMarkBits returns a pointer to 8 byte aligned bytes
 // to be used for a span's mark bits.
+// 获取一个新的8字节对齐bytes，用以一个新的span标记比特位
 func newMarkBits(nelems uintptr) *gcBits {
-	blocksNeeded := uintptr((nelems + 63) / 64)
-	bytesNeeded := blocksNeeded * 8
+	blocksNeeded := uintptr((nelems + 63) / 64) // nelems向上取整到64进行对齐
+	bytesNeeded := blocksNeeded * 8             // 取整后乘8，则得到需要的字节数
 
 	// Try directly allocating from the current head arena.
+	// 尝试从当前头场景直接分配
 	head := (*gcBitsArena)(atomic.Loadp(unsafe.Pointer(&gcBitsArenas.next)))
 	if p := head.tryAlloc(bytesNeeded); p != nil {
 		return p
@@ -2118,20 +2170,25 @@ func newMarkBits(nelems uintptr) *gcBits {
 
 	// There's not enough room in the head arena. We may need to
 	// allocate a new arena.
+	// 头场景空间不足，则需要分配一个新的场景
 	lock(&gcBitsArenas.lock)
 	// Try the head arena again, since it may have changed. Now
 	// that we hold the lock, the list head can't change, but its
 	// free position still can.
+	// 再次尝试头场景，因为他可能已经发生了变化(并发问题？)
+	// 现在我们得到了锁，列表头无法修改，但是他可能虽然有空闲位置
 	if p := gcBitsArenas.next.tryAlloc(bytesNeeded); p != nil {
 		unlock(&gcBitsArenas.lock)
 		return p
 	}
 
 	// Allocate a new arena. This may temporarily drop the lock.
+	// 分配一个新的场景，这可能会暂时解除锁定
 	fresh := newArenaMayUnlock()
 	// If newArenaMayUnlock dropped the lock, another thread may
 	// have put a fresh arena on the "next" list. Try allocating
 	// from next again.
+	// 如果newArenaMayUnlock删除了锁，则另一个线程可能已经将一个新的场景放到了“next”列表上。再次尝试从next开始分配。
 	if p := gcBitsArenas.next.tryAlloc(bytesNeeded); p != nil {
 		// Put fresh back on the free list.
 		// TODO: Mark it "already zeroed"
@@ -2143,12 +2200,14 @@ func newMarkBits(nelems uintptr) *gcBits {
 
 	// Allocate from the fresh arena. We haven't linked it in yet, so
 	// this cannot race and is guaranteed to succeed.
+	// 从新的场景分配。我们还没有把它联系起来，所以这无法竞争，而且一定会成功。
 	p := fresh.tryAlloc(bytesNeeded)
 	if p == nil {
 		throw("markBits overflow")
 	}
 
 	// Add the fresh arena to the "next" list.
+	// 将新场景放入next列表
 	fresh.next = gcBitsArenas.next
 	atomic.StorepNoWB(unsafe.Pointer(&gcBitsArenas.next), unsafe.Pointer(fresh))
 

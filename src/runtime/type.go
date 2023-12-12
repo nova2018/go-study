@@ -34,7 +34,7 @@ const (
 // ../internal/reflectlite/type.go:/^type.rtype.
 type _type struct {
 	size       uintptr
-	ptrdata    uintptr // size of memory prefix holding all pointers
+	ptrdata    uintptr // 译：保存所有指针的内存前缀的大小 // 注：这里是最后一个指针字段的偏移量，超过ptrdata的区域无指针 // size of memory prefix holding all pointers
 	hash       uint32
 	tflag      tflag
 	align      uint8
@@ -46,7 +46,10 @@ type _type struct {
 	// gcdata stores the GC type data for the garbage collector.
 	// If the KindGCProg bit is set in kind, gcdata is a GC program.
 	// Otherwise it is a ptrmask bitmap. See mbitmap.go for details.
-	gcdata    *byte
+	// 译：gcdata存储垃圾回收器的GC类型数据。
+	// 译：如果KindGCProg位设置在kind，则gcdata是GC程序。
+	// 译：否则，它是ptrmask位图。有关详细信息，请参阅mbitmap.go。
+	gcdata    *byte // 注：位图从右往左排列，由于结构体会根据指针长度进行内存对齐，因此位图标记的是指针变量的位置，每一位表示一个指针长度大小的内存空间
 	str       nameOff
 	ptrToThis typeOff
 }

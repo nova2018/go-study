@@ -11,38 +11,47 @@ import (
 )
 
 // Per-thread (in Go, per-P) cache for small objects.
+// 每一个线程(即P)缓存，用于小对象分配
 // This includes a small object cache and local allocation stats.
 // No locking needed because it is per-thread (per-P).
+// 这包含一个小对象缓存和本地分配状态
+// 由于是单一线程(P), 因此不需要锁
 //
 // mcaches are allocated from non-GC'd memory, so any heap pointers
 // must be specially handled.
+// mCach是从非GC内存中分配的，因此任何堆指针都必须经过特殊处理。
 type mcache struct {
 	_ sys.NotInHeap
 
 	// The following members are accessed on every malloc,
 	// so they are grouped here for better caching.
 	nextSample uintptr // trigger heap sample after allocating this many bytes
-	scanAlloc  uintptr // bytes of scannable heap allocated
+	scanAlloc  uintptr // 译：分配的可扫描堆的字节数 // bytes of scannable heap allocated
 
 	// Allocator cache for tiny objects w/o pointers.
+	// 用于不带(w/o=without)指针的微小对象的分配器缓存
 	// See "Tiny allocator" comment in malloc.go.
 
 	// tiny points to the beginning of the current tiny block, or
 	// nil if there is no current tiny block.
+	// Tiny指向当前极小块的开始，如果没有当前极小块，则为空。
 	//
 	// tiny is a heap pointer. Since mcache is in non-GC'd memory,
 	// we handle it by clearing it in releaseAll during mark
 	// termination.
+	// Tiny是一个堆指针。由于mcache位于非GC内存中，因此我们通过在标记终止期间在releaseAll中清除它来处理它。
 	//
 	// tinyAllocs is the number of tiny allocations performed
 	// by the P that owns this mcache.
+	// TinyAllocs是拥有此mcache的P执行的微小分配数。
 	tiny       uintptr
 	tinyoffset uintptr
 	tinyAllocs uintptr
 
 	// The rest is not accessed on every malloc.
+	// 其余部分并不是在每次malloc上都能访问的。
 
-	alloc [numSpanClasses]*mspan // spans to allocate from, indexed by spanClass
+	alloc [numSpanClasses]*mspan // 要从中分配的范围，按spanClass编制索引 （68*2 - 双倍） // spans to allocate from, indexed by spanClass
 
 	stackcache [_NumStackOrders]stackfreelist
 
@@ -50,6 +59,8 @@ type mcache struct {
 	// was last flushed. If flushGen != mheap_.sweepgen, the spans
 	// in this mcache are stale and need to the flushed so they
 	// can be swept. This is done in acquirep.
+	// flushGen指示上次刷新此mcache时使用的Sweepgen(变量，指的是mheap.sweepgen快照)。
+	// 如果flushGen！=mheap_.sweepgen，则此mcache中的span是陈旧的，需要刷新才能清扫它们。这会在acquirep中完成。
 	flushGen atomic.Uint32
 }
 
@@ -65,6 +76,7 @@ type gclink struct {
 
 // A gclinkptr is a pointer to a gclink, but it is opaque
 // to the garbage collector.
+// 译：gclinkptr是指向gclink的指针，但它对gc是不透明的。
 type gclinkptr uintptr
 
 // ptr returns the *gclink form of p.
@@ -120,9 +132,11 @@ func freemcache(c *mcache) {
 }
 
 // getMCache is a convenience function which tries to obtain an mcache.
-//
+// getMcache是一个方便的函数，用于获取mcache
 // Returns nil if we're not bootstrapping or we don't have a P. The caller's
 // P must not change, so we must be in a non-preemptible state.
+// 如果不是在启动中或者没有p，就会返回nil
+// 调用者的p禁止改变，因此我们必须处于非抢占状态
 func getMCache(mp *m) *mcache {
 	// Grab the mcache, since that's where stats live.
 	pp := mp.p.ptr()
@@ -132,6 +146,8 @@ func getMCache(mp *m) *mcache {
 		// in which case we use mcache0, which is set in mallocinit.
 		// mcache0 is cleared when bootstrapping is complete,
 		// by procresize.
+		// 如果启动时，我们无法通过p调用，此时我们使用mache0，他会在mallocinit被设置
+		// mallocinit会在启动完成时，通过procresize方法被清空
 		c = mcache0
 	} else {
 		c = pp.mcache
@@ -141,29 +157,35 @@ func getMCache(mp *m) *mcache {
 
 // refill acquires a new span of span class spc for c. This span will
 // have at least one free object. The current span in c must be full.
+// 译：refill获取c的对应span class(spc)的新span。至少有一个自由对象。C中的当前span必须是满的。
 //
 // Must run in a non-preemptible context since otherwise the owner of
 // c could change.
+// 译：必须在不可抢占的上下文中运行，否则c的所有者可能会更改。
 func (c *mcache) refill(spc spanClass) {
 	// Return the current cached span to the central lists.
-	s := c.alloc[spc]
+	// 译：将当前缓存的span返回到central列表。
+	s := c.alloc[spc] // 注：获取mcache的当前span
 
-	if uintptr(s.allocCount) != s.nelems {
+	if uintptr(s.allocCount) != s.nelems { // 注：如果未分配完毕抛异常
 		throw("refill of span with free space remaining")
 	}
-	if s != &emptymspan {
+	if s != &emptymspan { // 注：不是空span的指针
 		// Mark this span as no longer cached.
-		if s.sweepgen != mheap_.sweepgen+3 {
+		// 译：将此span标记为不再缓存
+		if s.sweepgen != mheap_.sweepgen+3 { // 注：相等表示 span已经被清扫，然后进行缓存，并且仍在缓存中? 费解
 			throw("bad sweepgen in refill")
 		}
-		mheap_.central[spc].mcentral.uncacheSpan(s)
+		mheap_.central[spc].mcentral.uncacheSpan(s) // 注：放入mcentral对应的span队列 从mcache->mcetral
 
 		// Count up how many slots were used and record it.
+		// 译：计算使用了多少槽并记录下来。
 		stats := memstats.heapStats.acquire()
-		slotsUsed := int64(s.allocCount) - int64(s.allocCountBeforeCache)
+		slotsUsed := int64(s.allocCount) - int64(s.allocCountBeforeCache) // 注：本次新增分配对象数
 		atomic.Xadd64(&stats.smallAllocCount[spc.sizeclass()], slotsUsed)
 
 		// Flush tinyAllocs.
+		// 译：刷新tinyAllocs
 		if spc == tinySpanClass {
 			atomic.Xadd64(&stats.tinyAllocCount, int64(c.tinyAllocs))
 			c.tinyAllocs = 0
@@ -171,15 +193,18 @@ func (c *mcache) refill(spc spanClass) {
 		memstats.heapStats.release()
 
 		// Count the allocs in inconsistent, internal stats.
-		bytesAllocated := slotsUsed * int64(s.elemsize)
+		// 译：在不一致的内部统计数据中计算分配数。
+		bytesAllocated := slotsUsed * int64(s.elemsize) // 注：本次新增分配字节数
 		gcController.totalAlloc.Add(bytesAllocated)
 
 		// Clear the second allocCount just to be safe.
+		// 译：为了安全起见，清除第二个allocCount。
 		s.allocCountBeforeCache = 0
 	}
 
 	// Get a new cached span from the central lists.
-	s = mheap_.central[spc].mcentral.cacheSpan()
+	// 译：从central列表中获取新的缓存span。
+	s = mheap_.central[spc].mcentral.cacheSpan() // 注：mcentral->mcache
 	if s == nil {
 		throw("out of memory")
 	}
@@ -190,10 +215,10 @@ func (c *mcache) refill(spc spanClass) {
 
 	// Indicate that this span is cached and prevent asynchronous
 	// sweeping in the next sweep phase.
-	s.sweepgen = mheap_.sweepgen + 3
+	s.sweepgen = mheap_.sweepgen + 3 // 注：标记为已扫描已cache
 
 	// Store the current alloc count for accounting later.
-	s.allocCountBeforeCache = s.allocCount
+	s.allocCountBeforeCache = s.allocCount // 注：记录上次已分配快照
 
 	// Update heapLive and flush scanAlloc.
 	//
@@ -209,17 +234,21 @@ func (c *mcache) refill(spc spanClass) {
 	// which appears to lead to more memory used. See #53738 for
 	// more details.
 	usedBytes := uintptr(s.allocCount) * s.elemsize
-	gcController.update(int64(s.npages*pageSize)-int64(usedBytes), int64(c.scanAlloc))
+	// 注：此处写入的是新获取的span实际空闲空间大小，即页空间-已分配空间
+	// 注：此处将上一个span的scanAlloc写入gcController, 同时把当前span的scanAlloc清空
+	gcController.update(int64(s.npages*pageSize)-int64(usedBytes), int64(c.scanAlloc)) // 注：更新gc监控数据
 	c.scanAlloc = 0
 
 	c.alloc[spc] = s
 }
 
 // allocLarge allocates a span for a large object.
+// 译：allocLarge为大型对象分配span
 func (c *mcache) allocLarge(size uintptr, noscan bool) *mspan {
 	if size+_PageSize < size {
 		throw("out of memory")
 	}
+	// 注：计算所需的页数
 	npages := size >> _PageShift
 	if size&_PageMask != 0 {
 		npages++
@@ -230,8 +259,8 @@ func (c *mcache) allocLarge(size uintptr, noscan bool) *mspan {
 	// pays the debt down to npage pages.
 	deductSweepCredit(npages*_PageSize, npages)
 
-	spc := makeSpanClass(0, noscan)
-	s := mheap_.alloc(npages, spc)
+	spc := makeSpanClass(0, noscan) // 注：sizeclass=0为大对象span
+	s := mheap_.alloc(npages, spc)  // 注：直接去堆中分配空间
 	if s == nil {
 		throw("out of memory")
 	}
@@ -246,13 +275,14 @@ func (c *mcache) allocLarge(size uintptr, noscan bool) *mspan {
 	gcController.totalAlloc.Add(int64(npages * pageSize))
 
 	// Update heapLive.
-	gcController.update(int64(s.npages*pageSize), 0)
+	gcController.update(int64(s.npages*pageSize), 0) // 注：更新gc监控数据
 
 	// Put the large span in the mcentral swept list so that it's
 	// visible to the background sweeper.
+	// 译：将大span放在mcenter已扫描列表中，这样背景清扫器就可以看到它。
 	mheap_.central[spc].mcentral.fullSwept(mheap_.sweepgen).push(s)
 	s.limit = s.base() + size
-	s.initHeapBits(false)
+	s.initHeapBits(false) // 注：初始化堆内位图？
 	return s
 }
 

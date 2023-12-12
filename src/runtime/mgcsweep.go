@@ -123,38 +123,47 @@ const sweepDrainedMask = 1 << 31
 
 // activeSweep is a type that captures whether sweeping
 // is done, and whether there are any outstanding sweepers.
+// 译：ActiveSweep是一种类型，它捕获是否完成了清扫，以及是否有未完成的清扫器
 //
 // Every potential sweeper must call begin() before they look
 // for work, and end() after they've finished sweeping.
+// 译：每个潜在的清扫者在寻找工作之前都必须调用Begin()，在完成清扫之后必须调用end()。
 type activeSweep struct {
 	// state is divided into two parts.
+	// 译：状态分为两部分
 	//
 	// The top bit (masked by sweepDrainedMask) is a boolean
 	// value indicating whether all the sweep work has been
 	// drained from the queue.
+	// 译：高位(由sweepDrainedMask掩码)是一个布尔值，指示是否所有清理工作都已从队列中排出
 	//
 	// The rest of the bits are a counter, indicating the
 	// number of outstanding concurrent sweepers.
+	// 译：其余的位是计数器，表示未完成的并发清扫器的数量。
 	state atomic.Uint32
 }
 
 // begin registers a new sweeper. Returns a sweepLocker
 // for acquiring spans for sweeping. Any outstanding sweeper blocks
 // sweep termination.
+// 译：begin注册新的清扫器。返回用于获取清扫span的SweepLocker。任何未完成的清扫器都会阻止清扫终止
 //
 // If the sweepLocker is invalid, the caller can be sure that all
 // outstanding sweep work has been drained, so there is nothing left
 // to sweep. Note that there may be sweepers currently running, so
 // this does not indicate that all sweeping has completed.
+// 译：如果SweepLocker无效，调用方可以确保所有未完成的清除工作都已耗尽，因此没有剩余的清除工作。
+// 译：请注意，当前可能有清扫器正在运行，因此这并不表示所有清扫器都已完成
 //
 // Even if the sweepLocker is invalid, its sweepGen is always valid.
+// 译：即使SweepLocker无效，其SweepGen也始终有效。
 func (a *activeSweep) begin() sweepLocker {
 	for {
 		state := a.state.Load()
-		if state&sweepDrainedMask != 0 {
+		if state&sweepDrainedMask != 0 { // 注：没有剩余清扫任务
 			return sweepLocker{mheap_.sweepgen, false}
 		}
-		if a.state.CompareAndSwap(state, state+1) {
+		if a.state.CompareAndSwap(state, state+1) { // 注：增加一个清扫器
 			return sweepLocker{mheap_.sweepgen, true}
 		}
 	}
@@ -193,10 +202,10 @@ func (a *activeSweep) end(sl sweepLocker) {
 func (a *activeSweep) markDrained() bool {
 	for {
 		state := a.state.Load()
-		if state&sweepDrainedMask != 0 {
+		if state&sweepDrainedMask != 0 { // 还有剩余清扫器
 			return false
 		}
-		if a.state.CompareAndSwap(state, state|sweepDrainedMask) {
+		if a.state.CompareAndSwap(state, state|sweepDrainedMask) { // 标记清扫结束
 			return true
 		}
 	}
@@ -219,7 +228,7 @@ func (a *activeSweep) isDone() bool {
 // The world must be stopped.
 func (a *activeSweep) reset() {
 	assertWorldStopped()
-	a.state.Store(0)
+	a.state.Store(0) // 注：准备下一轮清扫
 }
 
 // finishsweep_m ensures that all spans are swept.
@@ -334,6 +343,7 @@ type sweepLocked struct {
 
 // tryAcquire attempts to acquire sweep ownership of span s. If it
 // successfully acquires ownership, it blocks sweep completion.
+// 译：tryAcquire试图获取span的清扫所有权。如果成功获取所有权，它将阻止清扫完成。
 func (l *sweepLocker) tryAcquire(s *mspan) (sweepLocked, bool) {
 	if !l.valid {
 		throw("use of invalid sweepLocker")
@@ -370,7 +380,7 @@ func sweepone() uintptr {
 	npages := ^uintptr(0)
 	var noMoreWork bool
 	for {
-		s := mheap_.nextSpanForSweep()
+		s := mheap_.nextSpanForSweep() // 注：取得下一个待清扫的span
 		if s == nil {
 			noMoreWork = sweep.active.markDrained()
 			break
@@ -385,15 +395,15 @@ func sweepone() uintptr {
 			}
 			continue
 		}
-		if s, ok := sl.tryAcquire(s); ok {
+		if s, ok := sl.tryAcquire(s); ok { // 注：尝试获取清扫锁
 			// Sweep the span we found.
 			npages = s.npages
-			if s.sweep(false) {
+			if s.sweep(false) { // 注：span已被释放
 				// Whole span was freed. Count it toward the
 				// page reclaimer credit since these pages can
 				// now be used for span allocation.
 				mheap_.reclaimCredit.Add(npages)
-			} else {
+			} else { // 注：span未被释放
 				// Span is still in-use, so this returned no
 				// pages to the heap and the span needs to
 				// move to the swept in-use list.
@@ -489,23 +499,30 @@ func (s *mspan) ensureSwept() {
 // Returns true if the span was returned to heap.
 // If preserve=true, don't return it to heap nor relink in mcentral lists;
 // caller takes care of it.
+// 译：清除释放或收集在标记阶段未标记的块的终结器。
+// 它清除标记位，为下一轮GC做准备。
+// 如果span返回到堆，则返回TRUE。
+// 如果preserve=true，则不将其返回到堆，也不在mCentral列表中重新链接；调用者会处理它。
 func (sl *sweepLocked) sweep(preserve bool) bool {
 	// It's critical that we enter this function with preemption disabled,
 	// GC must not start while we are in the middle of this function.
+	// 译：至关重要的是，我们在禁用抢占的情况下进入该函数，当我们处于该函数的中间时，GC不能启动。
 	gp := getg()
 	if gp.m.locks == 0 && gp.m.mallocing == 0 && gp != gp.m.g0 {
 		throw("mspan.sweep: m is not locked")
 	}
 
-	s := sl.mspan
+	s := sl.mspan // 注：目标span
 	if !preserve {
 		// We'll release ownership of this span. Nil it out to
 		// prevent the caller from accidentally using it.
+		// 译：我们将释放此span的所有权。去掉它以防止调用者意外使用它。
 		sl.mspan = nil
 	}
 
 	sweepgen := mheap_.sweepgen
 	if state := s.state.get(); state != mSpanInUse || s.sweepgen != sweepgen-1 {
+		// 注：s.sweepgen == sweepgen-1 表示span正在被扫描
 		print("mspan.sweep: state=", state, " sweepgen=", s.sweepgen, " mheap.sweepgen=", sweepgen, "\n")
 		throw("mspan.sweep: bad span state")
 	}
@@ -514,7 +531,7 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 		traceGCSweepSpan(s.npages * _PageSize)
 	}
 
-	mheap_.pagesSwept.Add(int64(s.npages))
+	mheap_.pagesSwept.Add(int64(s.npages)) // 注：堆的扫描页数增加
 
 	spc := s.spanclass
 	size := s.elemsize
@@ -526,36 +543,52 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	// is not marked then the object remains unallocated
 	// since the last GC.
 	// This situation is analogous to being on a freelist.
+	// 译：allocBits指示哪些未标记的对象不需要处理，因为它们在上一个GC周期结束时是空闲的，并且此后没有分配。
+	// 译：如果allocBits索引>=s.freeindex并且该位未被标记，则自上次GC以来该对象保持未分配状态。
+	// 译：这种情况类似于被列入自由名单。
 
 	// Unlink & free special records for any objects we're about to free.
+	// 译：取消链接并释放我们要释放的任何对象的特殊记录。
 	// Two complications here:
+	// 译：这里有两个并发症：
 	// 1. An object can have both finalizer and profile special records.
 	//    In such case we need to queue finalizer for execution,
 	//    mark the object as live and preserve the profile special.
+	// 译：1.一个对象可以同时具有终结器和配置文件特殊记录。
+	// 译：  在这种情况下，我们需要对终结器进行排队执行，将对象标记为活动，并将配置文件保留为特殊配置文件。
 	// 2. A tiny object can have several finalizers setup for different offsets.
 	//    If such object is not marked, we need to queue all finalizers at once.
+	// 译：2.一个小对象可以为不同的偏移设置多个终结器。
+	// 译：  如果没有标记这样的对象，我们需要同时对所有终结器进行排队
 	// Both 1 and 2 are possible at the same time.
+	// 译：1和2同时是可能的。
 	hadSpecials := s.specials != nil
-	siter := newSpecialsIter(s)
-	for siter.valid() {
+	siter := newSpecialsIter(s) // 注：设置span的specials迭代器
+	for siter.valid() {         // 注：迭代specials
 		// A finalizer can be set for an inner byte of an object, find object beginning.
+		// 译：终结器可以设置在对象的内部字节，查找对象开头。
 		objIndex := uintptr(siter.s.offset) / size
-		p := s.base() + objIndex*size
-		mbits := s.markBitsForIndex(objIndex)
-		if !mbits.isMarked() {
+		p := s.base() + objIndex*size         // 注：取得对象的指针
+		mbits := s.markBitsForIndex(objIndex) // 注：跟进对象索引获取对应的gc位图
+		if !mbits.isMarked() {                // 注：如果是白色的？
 			// This object is not marked and has at least one special record.
 			// Pass 1: see if it has at least one finalizer.
+			// 译：此对象没有标记，并且至少有一个特殊记录。
+			// 译：步骤1：查看它是否至少有一个终结器。
 			hasFin := false
-			endOffset := p - s.base() + size
+			endOffset := p - s.base() + size // 注：endOffset = objIndex*size+size, 即指向下一个对象的偏移量
 			for tmp := siter.s; tmp != nil && uintptr(tmp.offset) < endOffset; tmp = tmp.next {
+				// 注：循环没看懂，难道sister.s是首地址，specials链表是连续空间？需要看下specials的赋值过程
 				if tmp.kind == _KindSpecialFinalizer {
 					// Stop freeing of object if it has a finalizer.
-					mbits.setMarkedNonAtomic()
+					// 译：如果对象具有终结器，则停止释放该对象。
+					mbits.setMarkedNonAtomic() // 注：标记为黑色？
 					hasFin = true
 					break
 				}
 			}
 			// Pass 2: queue all finalizers _or_ handle profile record.
+			// 译：步骤2：将所有终结器_or_处理配置文件记录排入队列。
 			for siter.valid() && uintptr(siter.s.offset) < endOffset {
 				// Find the exact byte for which the special was setup
 				// (as opposed to object beginning).
@@ -637,15 +670,16 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	}
 
 	// Count the number of free objects in this span.
-	nalloc := uint16(s.countAlloc())
-	nfreed := s.allocCount - nalloc
-	if nalloc > s.allocCount {
+	nalloc := uint16(s.countAlloc()) // 注：计算span中有多少个黑色对象
+	nfreed := s.allocCount - nalloc  // 注：本次释放对象个数
+	if nalloc > s.allocCount {       // 注：清扫后比原来还多是不正常的
 		// The zombie check above should have caught this in
 		// more detail.
 		print("runtime: nelems=", s.nelems, " nalloc=", nalloc, " previous allocCount=", s.allocCount, " nfreed=", nfreed, "\n")
 		throw("sweep increased allocation count")
 	}
 
+	// 注：重置对象分配状态
 	s.allocCount = nalloc
 	s.freeindex = 0 // reset allocation index to start of span.
 	s.freeIndexForScan = 0
@@ -655,11 +689,13 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 
 	// gcmarkBits becomes the allocBits.
 	// get a fresh cleared gcmarkBits in preparation for next GC
+	// 译：gcmarkBits变成allocBits。
+	// 译：获取新清除的gcmarkBits，为下一次GC做准备
 	s.allocBits = s.gcmarkBits
 	s.gcmarkBits = newMarkBits(s.nelems)
 
 	// Initialize alloc bits cache.
-	s.refillAllocCache(0)
+	s.refillAllocCache(0) // 注：基于新的allocBits重新计算第一组allocCache
 
 	// The span must be in our exclusive ownership until we update sweepgen,
 	// check for potential races.
@@ -673,26 +709,30 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 
 	// We need to set s.sweepgen = h.sweepgen only when all blocks are swept,
 	// because of the potential for a concurrent free/SetFinalizer.
+	// 译：我们只需要在所有块都被扫描时设置s.sweepgen=h.Sweepgen，因为可能会出现并发的空闲/SetFinalizer。
 	//
 	// But we need to set it before we make the span available for allocation
 	// (return it to heap or mcentral), because allocation code assumes that a
 	// span is already swept if available for allocation.
+	// 译：但是，我们需要在使span可用于分配(将其返回到堆或mCentral)之前设置它，因为分配代码假设span已被扫描(如果可用于分配)
 	//
 	// Serialization point.
 	// At this point the mark bits are cleared and allocation ready
 	// to go so release the span.
+	// 译：序列化点。此时，标记位被清除，分配准备就绪，因此释放跨度
 	atomic.Store(&s.sweepgen, sweepgen)
 
-	if s.isUserArenaChunk {
+	if s.isUserArenaChunk { // 注：是否在用户内存块
 		if preserve {
 			// This is a case that should never be handled by a sweeper that
 			// preserves the span for reuse.
 			throw("sweep: tried to preserve a user arena span")
 		}
-		if nalloc > 0 {
+		if nalloc > 0 { // 注：如果依然有剩余对象
 			// There still exist pointers into the span or the span hasn't been
 			// freed yet. It's not ready to be reused. Put it back on the
 			// full swept list for the next cycle.
+			// 译：仍然存在指向该范围的指针，或者该范围尚未释放。它还没有准备好被重复使用。把它放回下一个周期的完整扫描列表中。
 			mheap_.central[spc].mcentral.fullSwept(sweepgen).push(s)
 			return false
 		}
@@ -711,6 +751,7 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 				throw("user arena span is on the wrong list")
 			}
 			lock(&mheap_.lock)
+			// 注：将span从quarantineList转移至readyList
 			mheap_.userArena.quarantineList.remove(s)
 			mheap_.userArena.readyList.insert(s)
 			unlock(&mheap_.lock)
@@ -720,11 +761,13 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 
 	if spc.sizeclass() != 0 {
 		// Handle spans for small objects.
-		if nfreed > 0 {
+		// 译：控制小对象的span。
+		if nfreed > 0 { // 注：释放了对象
 			// Only mark the span as needing zeroing if we've freed any
 			// objects, because a fresh span that had been allocated into,
 			// wasn't totally filled, but then swept, still has all of its
 			// free slots zeroed.
+			// 译：如果我们释放了任何对象，则仅将范围标记为需要清零，因为已分配的新span并未完全填满，但随后被清扫，其所有空闲插槽仍被清零。
 			s.needzero = 1
 			stats := memstats.heapStats.acquire()
 			atomic.Xadd64(&stats.smallFreeCount[spc.sizeclass()], int64(nfreed))
@@ -739,21 +782,23 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 			// sweeping by updating sweepgen. If this span still is in
 			// an unswept set, then the mcentral will pop it off the
 			// set, check its sweepgen, and ignore it.
-			if nalloc == 0 {
+			if nalloc == 0 { // 注：剩余对象为0
 				// Free totally free span directly back to the heap.
-				mheap_.freeSpan(s)
+				mheap_.freeSpan(s) // 注：空span
 				return true
 			}
 			// Return span back to the right mcentral list.
-			if uintptr(nalloc) == s.nelems {
+			if uintptr(nalloc) == s.nelems { // 注：已分配完
+				// 注：进入已分满，已扫描队列
 				mheap_.central[spc].mcentral.fullSwept(sweepgen).push(s)
 			} else {
+				// 注：进入未分满，已扫描队列
 				mheap_.central[spc].mcentral.partialSwept(sweepgen).push(s)
 			}
 		}
 	} else if !preserve {
 		// Handle spans for large objects.
-		if nfreed != 0 {
+		if nfreed != 0 { // 注：如果释放了对象
 			// Free large object span to heap.
 
 			// NOTE(rsc,dvyukov): The original implementation of efence
@@ -852,20 +897,29 @@ func (s *mspan) reportZombies() {
 // performs sweeping to prevent going in to debt. If the caller will
 // also sweep pages (e.g., for a large allocation), it can pass a
 // non-zero callerSweepPages to leave that many pages unswept.
+// 译：reduceSweepCredit扣除分配大小为spanBytes的span的扫描信用
+// 这必须在分配span之前执行，以确保系统有足够的信用
+// 如有必要，它会进行彻底的清理，以防止陷入债务
+// 如果调用方还将扫描页面（例如，对于大的分配），则它可以传递一个非零的callerWeepPages，使许多页面不被扫描
 //
 // deductSweepCredit makes a worst-case assumption that all spanBytes
 // bytes of the ultimately allocated span will be available for object
 // allocation.
+// 译：reduceSweepCredit做了一个最坏的假设，即最终分配的span的所有spanBytes字节都将可用于对象分配
 //
 // deductSweepCredit is the core of the "proportional sweep" system.
 // It uses statistics gathered by the garbage collector to perform
 // enough sweeping so that all pages are swept during the concurrent
 // sweep phase between GC cycles.
+// 译：reduceSweepCredit是“比例扫描”系统的核心。它使用垃圾收集器收集的统计信息来执行足够的扫描，
+// 以便在GC周期之间的并发扫描阶段扫描所有页面
 //
 // mheap_ must NOT be locked.
+// 译：mheap_不能被锁
 func deductSweepCredit(spanBytes uintptr, callerSweepPages uintptr) {
 	if mheap_.sweepPagesPerByte == 0 {
 		// Proportional sweep is done or disabled.
+		// 译：完成或禁用比例扫描
 		return
 	}
 

@@ -30,13 +30,13 @@ const (
 
 // PtrSize is the size of a pointer in bytes - unsafe.Sizeof(uintptr(0)) but as an ideal constant.
 // It is also the size of the machine's native word size (that is, 4 on 32-bit systems, 8 on 64-bit).
-const PtrSize = 4 << (^uintptr(0) >> 63)
+const PtrSize = 4 << (^uintptr(0) >> 63) // 注：一个指针的大小
 
 // ArchFamily is the architecture family (AMD64, ARM, ...)
 const ArchFamily ArchFamilyType = _ArchFamily
 
 // BigEndian reports whether the architecture is big-endian.
-const BigEndian = IsArmbe|IsArm64be|IsMips|IsMips64|IsPpc|IsPpc64|IsS390|IsS390x|IsSparc|IsSparc64 == 1
+const BigEndian = IsArmbe|IsArm64be|IsMips|IsMips64|IsPpc|IsPpc64|IsS390|IsS390x|IsSparc|IsSparc64 == 1 // 注：amd64下为false
 
 // DefaultPhysPageSize is the default physical page size.
 const DefaultPhysPageSize = _DefaultPhysPageSize

@@ -71,33 +71,38 @@ type spanSetBlock struct {
 
 // push adds span s to buffer b. push is safe to call concurrently
 // with other push and pop operations.
+// 译：push将span s 加入缓冲区b，push与其他push/pop是并发安全的
 func (b *spanSet) push(s *mspan) {
-	// Obtain our slot.
+	// Obtain our slot. // 译：获取我们的槽
 	cursor := uintptr(b.index.incTail().tail() - 1)
-	top, bottom := cursor/spanSetBlockEntries, cursor%spanSetBlockEntries
+	top, bottom := cursor/spanSetBlockEntries, cursor%spanSetBlockEntries // 注：获取高位与低位
 
 	// Do we need to add a block?
+	// 译：我们是否需要增加一个块
 	spineLen := b.spineLen.Load()
 	var block *spanSetBlock
 retry:
 	if top < spineLen {
+		// 注：用top找块
 		block = b.spine.Load().lookup(top).Load()
 	} else {
 		// Add a new block to the spine, potentially growing
 		// the spine.
+		// 译：在spine中新增一个块，潜在的增长spine
 		lock(&b.spineLock)
 		// spineLen cannot change until we release the lock,
 		// but may have changed while we were waiting.
+		// 译：在我们释放锁之前，spineLen不能更改，但在我们等待的过程中可能已经更改。
 		spineLen = b.spineLen.Load()
-		if top < spineLen {
+		if top < spineLen { // 注：可能被别的push修改了，因此重新检查
 			unlock(&b.spineLock)
 			goto retry
 		}
 
 		spine := b.spine.Load()
-		if spineLen == b.spineCap {
+		if spineLen == b.spineCap { // 注：cap满了
 			// Grow the spine.
-			newCap := b.spineCap * 2
+			newCap := b.spineCap * 2 // 注：执行cap扩容
 			if newCap == 0 {
 				newCap = spanSetInitSpineCap
 			}
@@ -105,6 +110,7 @@ retry:
 			if b.spineCap != 0 {
 				// Blocks are allocated off-heap, so
 				// no write barriers.
+				// 译：块是在堆外分配的，因此不需要写屏障
 				memmove(newSpine, spine.p, b.spineCap*goarch.PtrSize)
 			}
 			spine = spanSetSpinePointer{newSpine}
@@ -119,10 +125,13 @@ retry:
 			// less than 2MB of memory on old spines. If
 			// this is a problem, we could free old spines
 			// during STW.
+			// 译：我们不能立即释放旧的spine，因为较低索引的并发推送可能仍在从中读取数据。
+			// 我们让它泄漏是因为即使是1TB的堆也会在旧的spine上浪费不到2MB的内存。
+			// 如果这是一个问题，我们可以在STW期间释放旧spine。
 		}
 
 		// Allocate a new block from the pool.
-		block = spanSetBlockPool.alloc()
+		block = spanSetBlockPool.alloc() // 译：对pool分配一个新的块
 
 		// Add it to the spine.
 		// Blocks are allocated off-heap, so no write barrier.
@@ -133,6 +142,7 @@ retry:
 
 	// We have a block. Insert the span atomically, since there may be
 	// concurrent readers via the block API.
+	// 译：我们有一个块。原子地插入span，因为可能有通过块API的并发读取。
 	block.spans[bottom].StoreNoWB(s)
 }
 
