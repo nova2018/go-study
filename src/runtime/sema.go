@@ -118,9 +118,10 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	}
 
 	// Easy case.
-	if cansemacquire(addr) {
+	if cansemacquire(addr) { // 注：获取到锁返回
 		return
 	}
+	// 注：没有得到锁
 
 	// Harder case:
 	//	increment waiter count
@@ -128,8 +129,14 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	//	enqueue itself as a waiter
 	//	sleep
 	//	(waiter descriptor is dequeued by signaler)
+	// 译：更难的情况：
+	// 译：递增服务员数量。
+	// 译：再试一次cansemquires，成功则返回。
+	// 译：自己排队当服务员。
+	// 译：睡眠。
+	// 译：(服务员描述符由信号器出列)
 	s := acquireSudog()
-	root := semtable.rootFor(addr)
+	root := semtable.rootFor(addr) // 注：获取一个semtable
 	t0 := int64(0)
 	s.releasetime = 0
 	s.acquiretime = 0
@@ -147,18 +154,21 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	for {
 		lockWithRank(&root.lock, lockRankRoot)
 		// Add ourselves to nwait to disable "easy case" in semrelease.
+		// 译：将我们自己添加到nwait中，以禁用semrelease中的“easy-case”。
 		root.nwait.Add(1)
 		// Check cansemacquire to avoid missed wakeup.
-		if cansemacquire(addr) {
+		// 译：勾选cansemAcquire以避免错过唤醒。
+		if cansemacquire(addr) { // 注：拿到了锁，直接返回
 			root.nwait.Add(-1)
 			unlock(&root.lock)
 			break
 		}
 		// Any semrelease after the cansemacquire knows we're waiting
 		// (we set nwait above), so go to sleep.
+		// 译：在cansemquire之后的任何semrelease都知道我们在等待(我们在上面设置了nwait)，所以去睡觉吧。
 		root.queue(addr, s, lifo)
-		goparkunlock(&root.lock, reason, traceEvGoBlockSync, 4+skipframes)
-		if s.ticket != 0 || cansemacquire(addr) {
+		goparkunlock(&root.lock, reason, traceEvGoBlockSync, 4+skipframes) // 注：协程阻塞
+		if s.ticket != 0 || cansemacquire(addr) {                          // 注：检查是否取得锁
 			break
 		}
 	}
@@ -244,7 +254,7 @@ func cansemacquire(addr *uint32) bool {
 
 // queue adds s to the blocked goroutines in semaRoot.
 func (root *semaRoot) queue(addr *uint32, s *sudog, lifo bool) {
-	s.g = getg()
+	s.g = getg() // 注：给sudog分配当前g
 	s.elem = unsafe.Pointer(addr)
 	s.next = nil
 	s.prev = nil

@@ -32,6 +32,11 @@ var traceback_env uint32
 // If level is 2, show tracebacks including runtime frames.
 // If all is set, print all goroutine stacks. Otherwise, print just the current goroutine.
 // If crash is set, crash (core dump, etc) after tracebacking.
+// 译：如果级别为0，则抑制所有回溯。
+// 译：如果级别为1，则显示回溯，但排除运行时帧。
+// 译：如果级别为2，则显示包括运行时帧的回溯。
+// 译：如果设置了all，则打印所有goroutine堆栈。否则，只打印当前goroutine。
+// 译：如果设置了崩溃，则在回溯后崩溃（核心转储等）。
 //
 //go:nosplit
 func gotraceback() (level int32, all, crash bool) {
@@ -477,7 +482,7 @@ func timediv(v int64, div int32, rem *int32) int32 {
 // Helpers for Go. Must be NOSPLIT, must only call NOSPLIT functions, and must not block.
 
 //go:nosplit
-func acquirem() *m {
+func acquirem() *m { // 注：防止m被抢占?
 	gp := getg()
 	gp.m.locks++
 	return gp.m

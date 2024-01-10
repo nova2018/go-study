@@ -51,16 +51,16 @@ type mcache struct {
 	// The rest is not accessed on every malloc.
 	// 其余部分并不是在每次malloc上都能访问的。
 
-	alloc [numSpanClasses]*mspan // 要从中分配的范围，按spanClass编制索引 （68*2 - 双倍） // spans to allocate from, indexed by spanClass
+	alloc [numSpanClasses]*mspan // 译：要从中分配的span，按spanClass编制索引 （68*2 - 双倍） // spans to allocate from, indexed by spanClass
 
-	stackcache [_NumStackOrders]stackfreelist
+	stackcache [_NumStackOrders]stackfreelist // 注：空闲栈缓存
 
 	// flushGen indicates the sweepgen during which this mcache
 	// was last flushed. If flushGen != mheap_.sweepgen, the spans
 	// in this mcache are stale and need to the flushed so they
 	// can be swept. This is done in acquirep.
-	// flushGen指示上次刷新此mcache时使用的Sweepgen(变量，指的是mheap.sweepgen快照)。
-	// 如果flushGen！=mheap_.sweepgen，则此mcache中的span是陈旧的，需要刷新才能清扫它们。这会在acquirep中完成。
+	// 译：flushGen指示上次刷新此mcache时使用的Sweepgen(变量，指的是mheap.sweepgen快照)。
+	// 译：如果flushGen！=mheap_.sweepgen，则此mcache中的span是陈旧的，需要刷新才能清扫它们。这会在acquirep中完成。
 	flushGen atomic.Uint32
 }
 
@@ -286,14 +286,14 @@ func (c *mcache) allocLarge(size uintptr, noscan bool) *mspan {
 	return s
 }
 
-func (c *mcache) releaseAll() {
+func (c *mcache) releaseAll() { // 注：归还全部的span交给mcentral
 	// Take this opportunity to flush scanAlloc.
 	scanAlloc := int64(c.scanAlloc)
 	c.scanAlloc = 0
 
 	sg := mheap_.sweepgen
 	dHeapLive := int64(0)
-	for i := range c.alloc {
+	for i := range c.alloc { // 注：遍历全部的span
 		s := c.alloc[i]
 		if s != &emptymspan {
 			slotsUsed := int64(s.allocCount) - int64(s.allocCountBeforeCache)
@@ -318,7 +318,7 @@ func (c *mcache) releaseAll() {
 			}
 
 			// Release the span to the mcentral.
-			mheap_.central[i].mcentral.uncacheSpan(s)
+			mheap_.central[i].mcentral.uncacheSpan(s) // 注：将span归还mcentral
 			c.alloc[i] = &emptymspan
 		}
 	}
@@ -339,6 +339,8 @@ func (c *mcache) releaseAll() {
 // prepareForSweep flushes c if the system has entered a new sweep phase
 // since c was populated. This must happen between the sweep phase
 // starting and the first allocation from c.
+// 译：如果系统在填充c之后进入了一个新的清除阶段，则prepareForSweep刷新c。
+// 译：这必须发生在扫描阶段开始和从c开始的第一次分配之间。
 func (c *mcache) prepareForSweep() {
 	// Alternatively, instead of making sure we do this on every P
 	// between starting the world and allocating on that P, we
@@ -347,6 +349,10 @@ func (c *mcache) prepareForSweep() {
 	// ensure all cached spans are swept, and then disable
 	// allocate-black. However, with this approach it's difficult
 	// to avoid spilling mark bits into the *next* GC cycle.
+	// 译：或者，我们可以保留allocate-black，允许allocate照常进行，
+	// 译：在扫描开始时使用粗糙的屏障以确保所有缓存范围都被扫描，然后禁用allocate-black，
+	// 译：而不是确保在启动世界和分配该P之间对每个P都执行此操作。
+	// 译：但是，使用这种方法很难避免将标记位溢出到下一个GC循环中。
 	sg := mheap_.sweepgen
 	flushGen := c.flushGen.Load()
 	if flushGen == sg {
@@ -355,7 +361,7 @@ func (c *mcache) prepareForSweep() {
 		println("bad flushGen", flushGen, "in prepareForSweep; sweepgen", sg)
 		throw("bad flushGen")
 	}
-	c.releaseAll()
-	stackcache_clear(c)
+	c.releaseAll()                    // 注：归还全部的span给mcentral
+	stackcache_clear(c)               // 注：释放栈缓存，空闲的栈空间
 	c.flushGen.Store(mheap_.sweepgen) // Synchronizes with gcStart
 }

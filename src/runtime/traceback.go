@@ -25,10 +25,13 @@ const usesLR = sys.MinFrameSize > 0
 // the runtime.Callers function (pcbuf != nil), as well as the garbage
 // collector (callback != nil).  A little clunky to merge these, but avoids
 // duplicating the code and all its subtlety.
+// 译：通用回溯。处理运行时堆栈打印（pcbuf==nil），即runtime.Callers函数（pcbuf！=nil）以及垃圾收集器（callback！=nil）。
+// 译：合并这些代码有点笨拙，但避免了重复代码及其所有微妙之处。
 //
 // The skip argument is only valid with pcbuf != nil and counts the number
 // of logical frames to skip rather than physical frames (with inlining, a
 // PC in pcbuf can represent multiple calls).
+// 译：skip参数仅对pcbuf有效！=nil，并计算要跳过的逻辑帧数，而不是物理帧数（通过内联，pcbuf中的PC可以表示多个调用）。
 func gentraceback(pc0, sp0, lr0 uintptr, gp *g, skip int, pcbuf *uintptr, max int, callback func(*stkframe, unsafe.Pointer) bool, v unsafe.Pointer, flags uint) int {
 	if skip > 0 && callback != nil {
 		throw("gentraceback callback cannot be used with non-zero skip")

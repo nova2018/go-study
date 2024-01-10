@@ -16,10 +16,13 @@ import (
 
 // finblock is an array of finalizers to be executed. finblocks are
 // arranged in a linked list for the finalizer queue.
+// 译：finblock是要执行的终结器的数组。finblock排列在终结器队列的链表中。
 //
 // finblock is allocated from non-GC'd memory, so any heap pointers
 // must be specially handled. GC currently assumes that the finalizer
 // queue does not grow during marking (but it can shrink).
+// 译：finblock是从非GC的内存中分配的，所以任何堆指针都必须经过特殊处理。
+// 译：GC当前假设终结器队列在标记期间不会增长（但它可以收缩）。
 type finblock struct {
 	_       sys.NotInHeap
 	alllink *finblock

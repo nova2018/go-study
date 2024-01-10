@@ -82,6 +82,9 @@ const (
 	// yet responsible for ready()ing it. Some suspendG must CAS
 	// the status to _Gwaiting to take responsibility for
 	// ready()ing this G.
+	// 译：_Gpreempted意味着这个goroutine为了一个suspendG抢占而停止了自己。
+	// 译：它类似于_Gwaiting，但还没有任何东西对ready()负责。
+	// 译：某些suspendG必须将状态设为_Gwaiting才能对该G的ready()负责。
 	_Gpreempted // 9
 
 	// _Gscan combined with one of the above states other than
@@ -194,7 +197,7 @@ type note struct {
 	key uintptr
 }
 
-type funcval struct {
+type funcval struct { // 注：闭包？
 	fn uintptr
 	// variable-size, fn-specific data here
 }
@@ -326,6 +329,10 @@ type gobuf struct {
 	// and restores it doesn't need write barriers. It's still
 	// typed as a pointer so that any other writes from Go get
 	// write barriers.
+	// 译：ctxt对于GC来说是不寻常的：它可能是一个堆分配的函数，所以GC需要跟踪它，但它需要设置并从程序集中清除，
+	// 译：在程序集中很难有写障碍。然而，ctxt实际上是一个保存的实时寄存器，我们只在真实寄存器和gobuf之间交换它。
+	// 译：因此，我们在堆栈扫描期间将其视为根，这意味着保存和恢复它的程序集不需要写障碍。
+	// 译：它仍然被键入为指针，因此Go中的任何其他写入都会遇到写入障碍。
 	sp   uintptr
 	pc   uintptr
 	g    guintptr
@@ -337,18 +344,24 @@ type gobuf struct {
 
 // sudog represents a g in a wait list, such as for sending/receiving
 // on a channel.
+// 译：sudog表示等待列表中的g，例如用于在信道上发送/接收。
 //
 // sudog is necessary because the g ↔ synchronization object relation
 // is many-to-many. A g can be on many wait lists, so there may be
 // many sudogs for one g; and many gs may be waiting on the same
 // synchronization object, so there may be many sudogs for one object.
+// 译：由于g↔同步对象关系是多对多的，因此sudog是必需的。G可以在多个等待列表上，因此一个g可能有多个sudog；
+// 译：而多个g可能在等待同一个同步对象，所以一个对象可能有多个sudog。
 //
 // sudogs are allocated from a special pool. Use acquireSudog and
 // releaseSudog to allocate and free them.
+// 译：sudogs是从一个特殊的池中分配的。使用acquireSudog和releaseSudog来分配和释放它们。
 type sudog struct {
 	// The following fields are protected by the hchan.lock of the
 	// channel this sudog is blocking on. shrinkstack depends on
 	// this for sudogs involved in channel ops.
+	// 译：以下字段受此sudog阻止的频道的hchan.lock保护。
+	// 译：对于涉及通道操作的数据，收缩堆栈依赖于此。
 
 	g *g
 
@@ -442,9 +455,9 @@ type g struct {
 	waitsince    int64      // approx time when the g become blocked
 	waitreason   waitReason // if status==Gwaiting
 
-	preempt       bool // preemption signal, duplicates stackguard0 = stackpreempt
-	preemptStop   bool // transition to _Gpreempted on preemption; otherwise, just deschedule
-	preemptShrink bool // shrink stack at synchronous safe point
+	preempt       bool // 译：抢占信号，重复stackguard0=stackpreempt // preemption signal, duplicates stackguard0 = stackpreempt
+	preemptStop   bool // 译：转换到_Gpreempted时被抢占；否则，仅取消计划 // transition to _Gpreempted on preemption; otherwise, just deschedule
+	preemptShrink bool // 译：在同步安全点收缩栈 // shrink stack at synchronous safe point
 
 	// asyncSafePoint is set if g is stopped at an asynchronous
 	// safe point. This means there are frames on the stack
@@ -703,6 +716,9 @@ type p struct {
 	// selected for immediate execution by
 	// gcController.findRunnableGCWorker. When scheduling other goroutines,
 	// this field must be set to gcMarkWorkerNotWorker.
+	// 译：gcMarkWorkerMode是下一个要运行的标记线程的模式。
+	// 译：也就是说，它用于与gcController.findRunnableGCWorker选择立即执行的工作程序goroutine进行通信。
+	// 译：调度其他goroutine时，此字段必须设置为gcMarkWorkerNotWorker。
 	gcMarkWorkerMode gcMarkWorkerMode
 	// gcMarkWorkerStartTime is the nanotime() at which the most recent
 	// mark worker started.
@@ -711,6 +727,8 @@ type p struct {
 	// gcw is this P's GC work buffer cache. The work buffer is
 	// filled by write barriers, drained by mutator assists, and
 	// disposed on certain GC state transitions.
+	// 译：gcw是这个P的GC工作缓冲区缓存。工作缓冲区由写屏障填充，
+	// 译：由赋值辅助耗尽，并在某些GC状态转换时释放。
 	gcw gcWork
 
 	// wbBuf is this P's GC write barrier buffer.
@@ -789,8 +807,8 @@ type schedt struct {
 
 	ngsys atomic.Int32 // number of system goroutines
 
-	pidle        puintptr // idle p's
-	npidle       atomic.Int32
+	pidle        puintptr      // idle p's
+	npidle       atomic.Int32  // 注: 空闲p数量
 	nmspinning   atomic.Int32  // See "Worker thread parking/unparking" comment in proc.go.
 	needspinning atomic.Uint32 // See "Delicate dance" comment in proc.go. Boolean. Must hold sched.lock to set to 1.
 

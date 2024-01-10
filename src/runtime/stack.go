@@ -69,21 +69,21 @@ const (
 	// to each stack below the usual guard area for OS-specific
 	// purposes like signal handling. Used on Windows, Plan 9,
 	// and iOS because they do not use a separate stack.
-	_StackSystem = goos.IsWindows*512*goarch.PtrSize + goos.IsPlan9*512 + goos.IsIos*goarch.IsArm64*1024
+	_StackSystem = goos.IsWindows*512*goarch.PtrSize + goos.IsPlan9*512 + goos.IsIos*goarch.IsArm64*1024 // 注：_StackSystem=0
 
 	// The minimum size of stack used by Go code
 	_StackMin = 2048
 
 	// The minimum stack size to allocate.
 	// The hackery here rounds FixedStack0 up to a power of 2.
-	_FixedStack0 = _StackMin + _StackSystem
-	_FixedStack1 = _FixedStack0 - 1
-	_FixedStack2 = _FixedStack1 | (_FixedStack1 >> 1)
-	_FixedStack3 = _FixedStack2 | (_FixedStack2 >> 2)
-	_FixedStack4 = _FixedStack3 | (_FixedStack3 >> 4)
-	_FixedStack5 = _FixedStack4 | (_FixedStack4 >> 8)
-	_FixedStack6 = _FixedStack5 | (_FixedStack5 >> 16)
-	_FixedStack  = _FixedStack6 + 1
+	_FixedStack0 = _StackMin + _StackSystem            // 注：_FixedStack0=2048+0=2048
+	_FixedStack1 = _FixedStack0 - 1                    // 注：_FixedStack1=2047
+	_FixedStack2 = _FixedStack1 | (_FixedStack1 >> 1)  // 注：_FixedStack2=2047|(2047>>1)=2047
+	_FixedStack3 = _FixedStack2 | (_FixedStack2 >> 2)  // 注：_FixedStack3=2047|(2047>>2)=2047
+	_FixedStack4 = _FixedStack3 | (_FixedStack3 >> 4)  // 注：_FixedStack4=2047|(2047>>4)=2047
+	_FixedStack5 = _FixedStack4 | (_FixedStack4 >> 8)  // 注：_FixedStack5=2047|(2047>>8)=2047
+	_FixedStack6 = _FixedStack5 | (_FixedStack5 >> 16) // 注：_FixedStack6=2047|(2047>>16)=2047
+	_FixedStack  = _FixedStack6 + 1                    // 注：_FixedStack=2047+1=2048
 
 	// Functions that need frames bigger than this use an extra
 	// instruction to do the stack split check, to avoid overflow
@@ -206,7 +206,7 @@ func stackpoolalloc(order uint8) gclinkptr {
 	lockWithRankMayAcquire(&mheap_.lock, lockRankMheap)
 	if s == nil {
 		// no free stacks. Allocate another span worth.
-		s = mheap_.allocManual(_StackCacheSize>>_PageShift, spanAllocStack)
+		s = mheap_.allocManual(_StackCacheSize>>_PageShift, spanAllocStack) // 注：s = mheap_.allocManual(4,spanAllocStack)
 		if s == nil {
 			throw("out of memory")
 		}
@@ -239,24 +239,26 @@ func stackpoolalloc(order uint8) gclinkptr {
 }
 
 // Adds stack x to the free pool. Must be called with stackpool[order].item.mu held.
-func stackpoolfree(x gclinkptr, order uint8) {
-	s := spanOfUnchecked(uintptr(x))
+func stackpoolfree(x gclinkptr, order uint8) { // 注：回收栈空间
+	s := spanOfUnchecked(uintptr(x)) // 注：取得栈对应的span
 	if s.state.get() != mSpanManual {
 		throw("freeing stack not in a stack span")
 	}
-	if s.manualFreeList.ptr() == nil {
+	if s.manualFreeList.ptr() == nil { // 注：首次归还span进入全局空闲栈，则加入全局队列
 		// s will now have a free stack
 		stackpool[order].item.span.insert(s)
 	}
-	x.ptr().next = s.manualFreeList
+	x.ptr().next = s.manualFreeList // 注：放入span的free列表中
 	s.manualFreeList = x
-	s.allocCount--
+	s.allocCount-- // 注：栈内存span分配-1
 	if gcphase == _GCoff && s.allocCount == 0 {
 		// Span is completely free. Return it to the heap
 		// immediately if we're sweeping.
+		// 译：span是完全自由的。如果我们正在清扫，请立即将其放回垃圾堆。
 		//
 		// If GC is active, we delay the free until the end of
 		// GC to avoid the following type of situation:
+		// 译：如果GC处于活动状态，我们将空闲延迟到GC结束，以避免出现以下类型的情况：
 		//
 		// 1) GC starts, scans a SudoG but does not yet mark the SudoG.elem pointer
 		// 2) The stack that pointer points to is copied
@@ -265,12 +267,19 @@ func stackpoolfree(x gclinkptr, order uint8) {
 		// 5) GC attempts to mark the SudoG.elem pointer. The
 		//    marking fails because the pointer looks like a
 		//    pointer into a free span.
+		// 译：1）GC启动，扫描SudoG，但尚未标记SudoG.elem指针
+		// 译：2）指针指向的堆栈被复制
+		// 译：3）旧堆栈被释放
+		// 译：4）包含的span标记为空闲
+		// 译：5）GC试图标记SudoG.elem指针。标记失败，因为指针看起来像是指向自由跨度的指针。
 		//
 		// By not freeing, we prevent step #4 until GC is done.
+		// 译：通过不释放，我们可以阻止步骤#4，直到GC完成。
+
 		stackpool[order].item.span.remove(s)
 		s.manualFreeList = 0
 		osStackFree(s)
-		mheap_.freeManual(s, spanAllocStack)
+		mheap_.freeManual(s, spanAllocStack) // 注：释放回堆
 	}
 }
 
@@ -475,6 +484,8 @@ func stackfree(stk stack) {
 		asanpoison(v, n)
 	}
 	if n < _FixedStack<<_NumStackOrders && n < _StackCacheSize {
+		// 注：较小的栈
+		// 注：linux下为 n < 2048<<4 = 8k && n < 32*1024=32k => n < 8k
 		order := uint8(0)
 		n2 := n
 		for n2 > _FixedStack {
@@ -482,13 +493,14 @@ func stackfree(stk stack) {
 			n2 >>= 1
 		}
 		x := gclinkptr(v)
-		if stackNoCache != 0 || gp.m.p == 0 || gp.m.preemptoff != "" {
+		if stackNoCache != 0 || gp.m.p == 0 || gp.m.preemptoff != "" { // 注：没有p或者curg在运行？
 			lock(&stackpool[order].item.mu)
 			stackpoolfree(x, order)
 			unlock(&stackpool[order].item.mu)
 		} else {
 			c := gp.m.p.ptr().mcache
 			if c.stackcache[order].size >= _StackCacheSize {
+				// 注：如果stackcache大小过大，超过32k，释放部分stackcache
 				stackcacherelease(c, order)
 			}
 			x.ptr().next = c.stackcache[order].list
@@ -496,7 +508,8 @@ func stackfree(stk stack) {
 			c.stackcache[order].size += n
 		}
 	} else {
-		s := spanOfUnchecked(uintptr(v))
+		// 注：较大的栈
+		s := spanOfUnchecked(uintptr(v)) // 注：取得span
 		if s.state.get() != mSpanManual {
 			println(hex(s.base()), v)
 			throw("bad span state")
@@ -505,7 +518,7 @@ func stackfree(stk stack) {
 			// Free the stack immediately if we're
 			// sweeping.
 			osStackFree(s)
-			mheap_.freeManual(s, spanAllocStack)
+			mheap_.freeManual(s, spanAllocStack) // 注：扫描阶段直接释放
 		} else {
 			// If the GC is running, we can't return a
 			// stack span to the heap because it could be
@@ -514,7 +527,7 @@ func stackfree(stk stack) {
 			// large stack cache instead.
 			log2npage := stacklog2(s.npages)
 			lock(&stackLarge.lock)
-			stackLarge.free[log2npage].insert(s)
+			stackLarge.free[log2npage].insert(s) // 注：加入大栈的待释放列表
 			unlock(&stackLarge.lock)
 		}
 	}
@@ -585,14 +598,17 @@ func adjustpointer(adjinfo *adjustinfo, vpp unsafe.Pointer) {
 // Information from the compiler about the layout of stack frames.
 // Note: this type must agree with reflect.bitVector.
 type bitvector struct {
-	n        int32 // # of bits
-	bytedata *uint8
+	n        int32  // # of bits
+	bytedata *uint8 // 注：位图，记录是否有指针
 }
 
 // ptrbit returns the i'th bit in bv.
 // ptrbit is less efficient than iterating directly over bitvector bits,
 // and should only be used in non-performance-critical code.
 // See adjustpointers for an example of a high-efficiency walk of a bitvector.
+// 译：ptrbit返回bv中的第i位。
+// 译：ptrbit的效率不如直接在位向量位上迭代，并且应该仅在非性能关键代码中使用。
+// 译：有关位向量的高效遍历的示例，请参见adjustpointers。
 func (bv *bitvector) ptrbit(i uintptr) uint8 {
 	b := *(addb(bv.bytedata, i/8))
 	return (b >> (i % 8)) & 1
@@ -1022,7 +1038,7 @@ func newstack() {
 	// into a real deadlock.
 	preempt := stackguard0 == stackPreempt
 	if preempt {
-		if !canPreemptM(thisg.m) {
+		if !canPreemptM(thisg.m) { // 注：当前M不可抢占
 			// Let the goroutine keep running for now.
 			// gp->preempt is set, so it will be preempted next time.
 			gp.stackguard0 = gp.stack.lo + _StackGuard
@@ -1217,7 +1233,7 @@ func shrinkstack(gp *g) {
 }
 
 // freeStackSpans frees unused stack spans at the end of GC.
-func freeStackSpans() {
+func freeStackSpans() { // 注：释放栈空间，归还给堆
 	// Scan stack pools for empty stack spans.
 	for order := range stackpool {
 		lock(&stackpool[order].item.mu)

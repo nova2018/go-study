@@ -301,11 +301,15 @@ type heapArena struct {
 	// pageSpecials is a bitmap that indicates which spans have
 	// specials (finalizers or other). Like pageInUse, only the bit
 	// corresponding to the first page in each span is used.
+	// 译：PageSpecials是一个位图，它指示哪些span有special(终结器或其他)。
+	// 译：与pageInUse类似，只使用与每个范围中的第一页对应的位。
 	//
 	// Writes are done atomically whenever a special is added to
 	// a span and whenever the last special is removed from a span.
 	// Reads are done atomically to find spans containing specials
 	// during marking.
+	// 译：每当将一个special添加到span中以及从span中删除最后一个special时，写入都以原子方式进行。
+	// 译：读取是以原子方式完成的，以在标记期间查找包含special项的span。
 	pageSpecials [pagesPerArena / 8]uint8
 
 	// checkmarks stores the debug.gccheckmark state. It is only
@@ -1015,22 +1019,29 @@ func (h *mheap) alloc(npages uintptr, spanclass spanClass) *mspan {
 
 // allocManual allocates a manually-managed span of npage pages.
 // allocManual returns nil if allocation fails.
+// 译：allocManual分配手动管理的nPage页面范围
+// 译：如果分配失败，则allocManual返回nil
 //
 // allocManual adds the bytes used to *stat, which should be a
 // memstats in-use field. Unlike allocations in the GC'd heap, the
 // allocation does *not* count toward heapInUse.
+// 译：allocManual将使用的字节添加到*stat，它应该是一个正在使用的Memstats字段。
+// 译：与GC堆中的分配不同，分配*不*计入heapInUse。
 //
 // The memory backing the returned span may not be zeroed if
 // span.needzero is set.
+// 译：如果设置了span.needzero，则支持返回span的内存可能不会归零。
 //
 // allocManual must be called on the system stack because it may
 // acquire the heap lock via allocSpan. See mheap for details.
+// 译：由于系统堆栈可能会通过allocSpan获取堆锁，因此必须在系统堆栈上调用allocManual，有关详细信息，请参阅mheap。
 //
 // If new code is written to call allocManual, do NOT use an
 // existing spanAllocType value and instead declare a new one.
+// 译：如果编写了新代码来调用allocManual，请不要使用现有的spanAllocType值，而是声明一个新的spanAllocType值。
 //
 //go:systemstack
-func (h *mheap) allocManual(npages uintptr, typ spanAllocType) *mspan {
+func (h *mheap) allocManual(npages uintptr, typ spanAllocType) *mspan { // 注：手动分配span，非gc堆，需要自己维护
 	if !typ.manual() {
 		throw("manual span allocation called with non-manually-managed type")
 	}
@@ -1224,13 +1235,14 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	// On some platforms we need to provide physical page aligned stack
 	// allocations. Where the page size is less than the physical page
 	// size, we already manage to do this by default.
-	needPhysPageAlign := physPageAlignedStacks && typ == spanAllocStack && pageSize < physPageSize
+	needPhysPageAlign := physPageAlignedStacks && typ == spanAllocStack && pageSize < physPageSize // 注：needPhysPageAlign=false
 
 	// If the allocation is small enough, try the page cache!
 	// The page cache does not support aligned allocations, so we cannot use
 	// it if we need to provide a physical page aligned stack allocation.
 	pp := gp.m.p.ptr()
-	if !needPhysPageAlign && pp != nil && npages < pageCachePages/4 {
+	if !needPhysPageAlign && pp != nil && npages < pageCachePages/4 { // 注：npages < 16
+		// 注：较小的span
 		c := &pp.pcache
 
 		// If the cache is empty, refill it.
@@ -1585,7 +1597,7 @@ func (h *mheap) grow(npage uintptr) (uintptr, bool) {
 }
 
 // Free the span back into the heap.
-func (h *mheap) freeSpan(s *mspan) {
+func (h *mheap) freeSpan(s *mspan) { // 注：堆释放
 	systemstack(func() {
 		pageTraceFree(getg().m.p.ptr(), 0, s.base(), s.npages)
 
@@ -1618,7 +1630,7 @@ func (h *mheap) freeSpan(s *mspan) {
 // the heap lock. See mheap for details.
 //
 //go:systemstack
-func (h *mheap) freeManual(s *mspan, typ spanAllocType) {
+func (h *mheap) freeManual(s *mspan, typ spanAllocType) { // 注：手动释放
 	pageTraceFree(getg().m.p.ptr(), 0, s.base(), s.npages)
 
 	s.needzero = 1
@@ -1926,7 +1938,7 @@ func removespecial(p unsafe.Pointer, kind uint8) *special {
 	mp := acquirem()
 	span.ensureSwept()
 
-	offset := uintptr(p) - span.base()
+	offset := uintptr(p) - span.base() // 注：p在span的偏移量
 
 	var result *special
 	lock(&span.speciallock)
@@ -1938,7 +1950,7 @@ func removespecial(p unsafe.Pointer, kind uint8) *special {
 		}
 		// This function is used for finalizers only, so we don't check for
 		// "interior" specials (p must be exactly equal to s->offset).
-		if offset == uintptr(s.offset) && kind == s.kind {
+		if offset == uintptr(s.offset) && kind == s.kind { // 注：找到p
 			*t = s.next
 			result = s
 			break
@@ -2006,7 +2018,7 @@ func addfinalizer(p unsafe.Pointer, f *funcval, nret uintptr, fint *_type, ot *p
 }
 
 // Removes the finalizer (if any) from the object p.
-func removefinalizer(p unsafe.Pointer) {
+func removefinalizer(p unsafe.Pointer) { // 注：从finalizer中删除
 	s := (*specialfinalizer)(unsafe.Pointer(removespecial(p, _KindSpecialFinalizer)))
 	if s == nil {
 		return // there wasn't a finalizer to remove
@@ -2228,6 +2240,8 @@ func newAllocBits(nelems uintptr) *gcBits {
 // nextMarkBitArenaEpoch establishes a new epoch for the arenas
 // holding the mark bits. The arenas are named relative to the
 // current GC cycle which is demarcated by the call to finishweep_m.
+// 译：NextMarkBitArenaEpoch为持有标记比特的竞技场建立新纪元。
+// 译：竞技场是相对于当前GC周期命名的，当前GC周期是通过调用finishweep_m来划分的。
 //
 // All current spans have been swept.
 // During that sweep each span allocated room for its gcmarkBits in
@@ -2239,6 +2253,12 @@ func newAllocBits(nelems uintptr) *gcBits {
 // The span's sweep extinguishes all the references to gcBitsArenas.previous
 // by pointing gcAllocBits into the gcBitsArenas.current.
 // The gcBitsArenas.previous is released to the gcBitsArenas.free list.
+// 译：所有当前span都已被清理。
+// 译：在该扫描过程中，每个范围在gcBitsArenas.Next块中为其gcmarkBits分配空间。
+// 译：GcBitsArenas.Next成为gcBitsArenas.Current，GC将在其中标记对象，并且在每个范围被扫描之后，这些位将用于分配对象。
+// 译：CBitsArenas.Current变为gcBitsArenas.previous，span的gcAllocBits在此GC周期期间所有span都被清理完毕。
+// 译：通过将gcAllocBits指向gcBitsArenas.Current，范围的扫描消除了所有对gcBitsArenas.previous的引用。
+// 译：GcBitsArenas.previous被发布到gcBitsArenas.Free列表。
 func nextMarkBitArenaEpoch() {
 	lock(&gcBitsArenas.lock)
 	if gcBitsArenas.previous != nil {

@@ -9,7 +9,7 @@ import (
 	"unsafe"
 )
 
-const pageCachePages = 8 * unsafe.Sizeof(pageCache{}.cache)
+const pageCachePages = 8 * unsafe.Sizeof(pageCache{}.cache) // 注：pageCachePages=8*8=64
 
 // pageCache represents a per-p cache of pages the allocator can
 // allocate from without a lock. More specifically, it represents

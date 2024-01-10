@@ -96,7 +96,7 @@ func (s sweepClass) split() (spc spanClass, full bool) {
 // nextSpanForSweep finds and pops the next span for sweeping from the
 // central sweep buffers. It returns ownership of the span to the caller.
 // Returns nil if no such span exists.
-func (h *mheap) nextSpanForSweep() *mspan {
+func (h *mheap) nextSpanForSweep() *mspan { // 注：从mcentral返回一个待清扫的span
 	sg := h.sweepgen
 	for sc := sweep.centralIndex.load(); sc < numSweepClasses; sc++ {
 		spc, full := sc.split()
@@ -245,7 +245,7 @@ func finishsweep_m() {
 	// shouldn't be any spans left to sweep, so this should finish
 	// instantly. If GC was forced before the concurrent sweep
 	// finished, there may be spans to sweep.
-	for sweepone() != ^uintptr(0) {
+	for sweepone() != ^uintptr(0) { // 注：完成清扫任务
 		sweep.npausesweep++
 	}
 
@@ -263,7 +263,7 @@ func finishsweep_m() {
 	// so that we can catch unswept spans and reclaim blocks as
 	// soon as possible.
 	sg := mheap_.sweepgen
-	for i := range mheap_.central {
+	for i := range mheap_.central { // 注：重置待清扫列表
 		c := &mheap_.central[i].mcentral
 		c.partialUnswept(sg).reset()
 		c.fullUnswept(sg).reset()
@@ -361,7 +361,7 @@ func (l *sweepLocker) tryAcquire(s *mspan) (sweepLocked, bool) {
 
 // sweepone sweeps some unswept heap span and returns the number of pages returned
 // to the heap, or ^uintptr(0) if there was nothing to sweep.
-func sweepone() uintptr {
+func sweepone() uintptr { // 注：处理清扫
 	gp := getg()
 
 	// Increment locks to ensure that the goroutine is not preempted
@@ -370,8 +370,8 @@ func sweepone() uintptr {
 
 	// TODO(austin): sweepone is almost always called in a loop;
 	// lift the sweepLocker into its callers.
-	sl := sweep.active.begin()
-	if !sl.valid {
+	sl := sweep.active.begin() // 注：增加清扫器
+	if !sl.valid {             // 注：没有可执行的任务
 		gp.m.locks--
 		return ^uintptr(0)
 	}
@@ -381,7 +381,7 @@ func sweepone() uintptr {
 	var noMoreWork bool
 	for {
 		s := mheap_.nextSpanForSweep() // 注：取得下一个待清扫的span
-		if s == nil {
+		if s == nil {                  // 注：没有新的span，则清扫完成
 			noMoreWork = sweep.active.markDrained()
 			break
 		}
@@ -398,12 +398,14 @@ func sweepone() uintptr {
 		if s, ok := sl.tryAcquire(s); ok { // 注：尝试获取清扫锁
 			// Sweep the span we found.
 			npages = s.npages
-			if s.sweep(false) { // 注：span已被释放
+			if s.sweep(false) { // 注：清扫
+				// 注：span已被释放
 				// Whole span was freed. Count it toward the
 				// page reclaimer credit since these pages can
 				// now be used for span allocation.
 				mheap_.reclaimCredit.Add(npages)
-			} else { // 注：span未被释放
+			} else {
+				// 注：span未被释放
 				// Span is still in-use, so this returned no
 				// pages to the heap and the span needs to
 				// move to the swept in-use list.
@@ -500,10 +502,10 @@ func (s *mspan) ensureSwept() {
 // If preserve=true, don't return it to heap nor relink in mcentral lists;
 // caller takes care of it.
 // 译：清除释放或收集在标记阶段未标记的块的终结器。
-// 它清除标记位，为下一轮GC做准备。
-// 如果span返回到堆，则返回TRUE。
-// 如果preserve=true，则不将其返回到堆，也不在mCentral列表中重新链接；调用者会处理它。
-func (sl *sweepLocked) sweep(preserve bool) bool {
+// 译：它清除标记位，为下一轮GC做准备。
+// 译：如果span返回到堆，则返回TRUE。
+// 译：如果preserve=true，则不将其返回到堆，也不在mCentral列表中重新链接；调用者会处理它。
+func (sl *sweepLocked) sweep(preserve bool) bool { // 注：清扫span
 	// It's critical that we enter this function with preemption disabled,
 	// GC must not start while we are in the middle of this function.
 	// 译：至关重要的是，我们在禁用抢占的情况下进入该函数，当我们处于该函数的中间时，GC不能启动。
@@ -776,7 +778,7 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 			// Count the frees in the inconsistent, internal stats.
 			gcController.totalFree.Add(int64(nfreed) * int64(s.elemsize))
 		}
-		if !preserve {
+		if !preserve { // 注：允许归还堆
 			// The caller may not have removed this span from whatever
 			// unswept set its on but taken ownership of the span for
 			// sweeping by updating sweepgen. If this span still is in
@@ -796,9 +798,9 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 				mheap_.central[spc].mcentral.partialSwept(sweepgen).push(s)
 			}
 		}
-	} else if !preserve {
+	} else if !preserve { // 注：允许归还堆
 		// Handle spans for large objects.
-		if nfreed != 0 { // 注：如果释放了对象
+		if nfreed != 0 { // 注：如果释放了对象，此处是大对象span(单一对象span)，释放了对象，说明当前span空闲，则归还堆
 			// Free large object span to heap.
 
 			// NOTE(rsc,dvyukov): The original implementation of efence

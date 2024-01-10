@@ -25,19 +25,27 @@ func getg() *g
 
 // mcall switches from the g to the g0 stack and invokes fn(g),
 // where g is the goroutine that made the call.
+// 译：mcall从g切换到g0堆栈并调用fn(g)，其中g是进行调用的Goroutine。
 // mcall saves g's current PC/SP in g->sched so that it can be restored later.
 // It is up to fn to arrange for that later execution, typically by recording
 // g in a data structure, causing something to call ready(g) later.
 // mcall returns to the original goroutine g later, when g has been rescheduled.
 // fn must not return at all; typically it ends by calling schedule, to let the m
 // run other goroutines.
+// 译：mcall将g的当前PC/SP保存在g->sched中，以便以后可以恢复。
+// 译：通常通过将g记录在数据结构中，导致稍后调用ready(g)，这取决于fn来安排稍后执行。
+// 译：当g已被重新安排时，mcall稍后返回到原始的goroutine g。
+// 译：Fn必须完全不返回；通常它以调用调度结束，以便让m运行其他Goroutine。
 //
 // mcall can only be called from g stacks (not g0, not gsignal).
+// 译：mcAll只能从g堆栈调用(不是g0，也不是gsignal)。
 //
 // This must NOT be go:noescape: if fn is a stack-allocated closure,
 // fn puts g on a run queue, and g executes before fn returns, the
 // closure will be invalidated while it is still executing.
-func mcall(fn func(*g))
+// 译：这不能是go:noescape: 如果fn是堆栈分配的闭包，fn将g放在运行队列中，
+// 译：并且g在fn返回之前执行，则闭包将在其仍在执行时无效。
+func mcall(fn func(*g)) // 注：mcall之后，p/g分离，p进入g0，执行fn, g留在mcall的调用处，进行后续任务
 
 // systemstack runs fn on a system stack.
 // If systemstack is called from the per-OS-thread (g0) stack, or
@@ -421,7 +429,7 @@ func alignDown(n, a uintptr) uintptr {
 }
 
 // divRoundUp returns ceil(n / a).
-func divRoundUp(n, a uintptr) uintptr {
+func divRoundUp(n, a uintptr) uintptr { // 注：向上取整
 	// a is generally a power of two. This will get inlined and
 	// the compiler will optimize the division.
 	return (n + a - 1) / a

@@ -156,7 +156,7 @@ GLOBL bad_cpu_msg<>(SB), RODATA, $84
 
 #endif
 
-TEXT runtime·rt0_go(SB),NOSPLIT|TOPFRAME,$0
+TEXT runtime·rt0_go(SB),NOSPLIT|TOPFRAME,$0 // 注：真正的启动函数
 	// copy arguments forward on an even stack
 	MOVQ	DI, AX		// argc
 	MOVQ	SI, BX		// argv
@@ -409,7 +409,7 @@ TEXT runtime·gogo(SB), NOSPLIT, $0-8
 TEXT gogo<>(SB), NOSPLIT, $0
 	get_tls(CX)
 	MOVQ	DX, g(CX)
-	MOVQ	DX, R14		// set the g register
+	MOVQ	DX, R14		// set the g register // 注：R14总是等于正在运行的g
 	MOVQ	gobuf_sp(BX), SP	// restore SP
 	MOVQ	gobuf_ret(BX), AX
 	MOVQ	gobuf_ctxt(BX), DX
@@ -428,12 +428,13 @@ TEXT gogo<>(SB), NOSPLIT, $0
 TEXT runtime·mcall<ABIInternal>(SB), NOSPLIT, $0-8
 	MOVQ	AX, DX	// DX = fn
 
+    // 注：保存g的上下文
 	// save state in g->sched
 	MOVQ	0(SP), BX	// caller's PC
-	MOVQ	BX, (g_sched+gobuf_pc)(R14)
+	MOVQ	BX, (g_sched+gobuf_pc)(R14) // 注：gobuf_pc=0(SP) pc
 	LEAQ	fn+0(FP), BX	// caller's SP
-	MOVQ	BX, (g_sched+gobuf_sp)(R14)
-	MOVQ	BP, (g_sched+gobuf_bp)(R14)
+	MOVQ	BX, (g_sched+gobuf_sp)(R14) // 注：gobuf_sp=&(fn+0(FP))
+	MOVQ	BP, (g_sched+gobuf_bp)(R14) // 注：gobuf_bp=BP
 
 	// switch to m->g0 & its stack, call fn
 	MOVQ	g_m(R14), BX

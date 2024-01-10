@@ -213,7 +213,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	if sg := c.recvq.dequeue(); sg != nil {
 		// Found a waiting receiver. We pass the value we want to send
 		// directly to the receiver, bypassing the channel buffer (if any).
-		send(c, sg, ep, func() { unlock(&c.lock) }, 3)
+		send(c, sg, ep, func() { unlock(&c.lock) }, 3) // 注：如果有阻塞的g，则直接唤醒
 		return true
 	}
 
@@ -316,7 +316,7 @@ func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 		sendDirect(c.elemtype, sg, ep)
 		sg.elem = nil
 	}
-	gp := sg.g
+	gp := sg.g // 注：从sudog中获取g
 	unlockf()
 	gp.param = unsafe.Pointer(sg)
 	sg.success = true

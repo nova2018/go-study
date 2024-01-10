@@ -122,7 +122,7 @@ type stackWorkBufHdr struct {
 
 // Buffer for stack objects found on a goroutine stack.
 // Must be smaller than or equal to workbuf.
-type stackObjectBuf struct {
+type stackObjectBuf struct { // 注：链表
 	_ sys.NotInHeap
 	stackObjectBufHdr
 	obj [(_WorkbufSize - unsafe.Sizeof(stackObjectBufHdr{})) / unsafe.Sizeof(stackObject{})]stackObject
@@ -178,14 +178,19 @@ type stackScanState struct {
 	// buf contains the set of possible pointers to stack objects.
 	// Organized as a LIFO linked list of buffers.
 	// All buffers except possibly the head buffer are full.
-	buf     *stackWorkBuf
-	freeBuf *stackWorkBuf // keep around one free buffer for allocation hysteresis
+	// 译：buf包含一组可能指向栈对象的指针。
+	// 译：组织为后进先出法缓冲区链表。
+	// 译：除了可能的头缓冲区外，所有缓冲区都已满。
+	buf     *stackWorkBuf // 注：链表
+	freeBuf *stackWorkBuf // 注：仅一个元素 // 译：为分配滞后保留一个可用缓冲区 // keep around one free buffer for allocation hysteresis
 
 	// cbuf contains conservative pointers to stack objects. If
 	// all pointers to a stack object are obtained via
 	// conservative scanning, then the stack object may be dead
 	// and may contain dead pointers, so it must be scanned
 	// defensively.
+	// 译：cbuf包含指向堆栈对象的保守指针。如果指向堆栈对象的所有指针都是通过保守扫描获得的，
+	// 译：那么堆栈对象可能是死的，并且可能包含死指针，因此必须对其进行防御扫描。
 	cbuf *stackWorkBuf
 
 	// list of stack objects
@@ -201,13 +206,15 @@ type stackScanState struct {
 
 // Add p as a potential pointer to a stack object.
 // p must be a stack address.
+// 译：添加p作为指向堆栈对象的潜在指针。
+// 译：p必须是堆栈地址。
 func (s *stackScanState) putPtr(p uintptr, conservative bool) {
 	if p < s.stack.lo || p >= s.stack.hi {
 		throw("address not a stack address")
 	}
 	head := &s.buf
-	if conservative {
-		head = &s.cbuf
+	if conservative { // 注：保守的
+		head = &s.cbuf // 注：此处切换了地址，*head=s.cbuf
 	}
 	buf := *head
 	if buf == nil {
@@ -258,7 +265,7 @@ func (s *stackScanState) getPtr() (p uintptr, conservative bool) {
 			}
 		}
 		buf.nobj--
-		return buf.obj[buf.nobj], head == &s.cbuf
+		return buf.obj[buf.nobj], head == &s.cbuf // 注：s.cbuf
 	}
 	// No more data in either list.
 	if s.freeBuf != nil {
@@ -311,6 +318,8 @@ func (s *stackScanState) buildIndex() {
 // (The first object that was not included in the binary search tree.)
 // If n == 0, returns nil, x.
 func binarySearchTree(x *stackObjectBuf, idx int, n int) (root *stackObject, restBuf *stackObjectBuf, restIdx int) {
+	// 注：前序遍历写入
+	// 注：左一半放左枝，中间放根，剩余放右枝
 	if n == 0 {
 		return nil, x, idx
 	}
@@ -331,17 +340,18 @@ func binarySearchTree(x *stackObjectBuf, idx int, n int) (root *stackObject, res
 // findObject returns the stack object containing address a, if any.
 // Must have called buildIndex previously.
 func (s *stackScanState) findObject(a uintptr) *stackObject {
-	off := uint32(a - s.stack.lo)
+	off := uint32(a - s.stack.lo) // 注：栈内偏移量
 	obj := s.root
+	// 注：搜索树
 	for {
 		if obj == nil {
 			return nil
 		}
-		if off < obj.off {
+		if off < obj.off { // 注：左枝
 			obj = obj.left
 			continue
 		}
-		if off >= obj.off+obj.size {
+		if off >= obj.off+obj.size { // 注：右枝
 			obj = obj.right
 			continue
 		}

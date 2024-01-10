@@ -75,6 +75,8 @@ type suspendGState struct {
 // suspendG suspends goroutine gp at a safe-point and returns the
 // state of the suspended goroutine. The caller gets read access to
 // the goroutine until it calls resumeG.
+// 译：suspendG将goroutine gp挂起在一个安全点，并返回挂起的goroutine的状态。
+// 译：调用方获得对goroutine的读取访问权限，直到调用resumeG为止。
 //
 // It is safe for multiple callers to attempt to suspend the same
 // goroutine at the same time. The goroutine may execute between
@@ -82,12 +84,19 @@ type suspendGState struct {
 // implementation grants exclusive access to the goroutine, and hence
 // multiple callers will serialize. However, the intent is to grant
 // shared read access, so please don't depend on exclusive access.
+// 译：多个调用方尝试同时挂起同一个goroutine是安全的。
+// 译：goroutine可以在后续成功的挂起操作之间执行。
+// 译：当前实现授予对goroutine的独占访问权限，因此多个调用方将进行序列化。
+// 译：但是，其目的是授予共享读取访问权限，因此请不要依赖于独占访问。
 //
 // This must be called from the system stack and the user goroutine on
 // the current M (if any) must be in a preemptible state. This
 // prevents deadlocks where two goroutines attempt to suspend each
 // other and both are in non-preemptible states. There are other ways
 // to resolve this deadlock, but this seems simplest.
+// 译：这必须从系统堆栈调用，并且当前M上的用户goroutine（如果有的话）必须处于可抢占状态。
+// 译：这可以防止两个goroutine试图挂起对方并且都处于不可抢占状态的死锁。
+// 译：还有其他方法可以解决这个僵局，但这似乎是最简单的。
 //
 // TODO(austin): What if we instead required this to be called from a
 // user goroutine? Then we could deschedule the goroutine while
@@ -99,10 +108,18 @@ type suspendGState struct {
 // kernel context switch in the synchronous case because we could just
 // directly schedule the waiter. The context switch is unavoidable in
 // the signal case.
+// 译：TODO（austin）：如果我们要求从用户goroutine调用它呢？
+// 译：然后我们可以在等待时取消goroutine的调度，而不是阻塞线程。
+// 译：如果两个goroutines试图暂停对方，其中一个会赢，另一个在恢复之前不会完成暂停。
+// 译：我们必须小心，他们不能真正排队为对方暂停，然后两者都被暂停。
+// 译：这也将避免在同步情况下需要内核上下文切换，因为我们可以直接调度服务生。
+// 译：上下文切换在信号情况下是不可避免的。
 //
 //go:systemstack
 func suspendG(gp *g) suspendGState {
 	if mp := getg().m; mp.curg != nil && readgstatus(mp.curg) == _Grunning {
+		// 注：如果当前g存在，那么当前g的状态必须不能是_Grunning
+
 		// Since we're on the system stack of this M, the user
 		// G is stuck at an unsafe point. If another goroutine
 		// were to try to preempt m.curg, it could deadlock.
@@ -133,7 +150,7 @@ func suspendG(gp *g) suspendGState {
 			dumpgstatus(gp)
 			throw("invalid g status")
 
-		case _Gdead:
+		case _Gdead: // 注：g已被释放/空闲
 			// Nothing to suspend.
 			//
 			// preemptStop may need to be cleared, but
@@ -141,29 +158,31 @@ func suspendG(gp *g) suspendGState {
 			// reuse. Instead, goexit0 clears it.
 			return suspendGState{dead: true}
 
-		case _Gcopystack:
+		case _Gcopystack: // 注：栈正在被复制
 			// The stack is being copied. We need to wait
 			// until this is done.
 
-		case _Gpreempted:
+		case _Gpreempted: // 注：g被抢占
 			// We (or someone else) suspended the G. Claim
 			// ownership of it by transitioning it to
 			// _Gwaiting.
-			if !casGFromPreempted(gp, _Gpreempted, _Gwaiting) {
+			// 译：我们（或其他人）暂停了G.通过将其转换为_Gwaiting来声明其所有权。
+			if !casGFromPreempted(gp, _Gpreempted, _Gwaiting) { // 注：修改g的状态 _Gpreempted -> _Gwaiting
 				break
 			}
 
 			// We stopped the G, so we have to ready it later.
+			// 译：我们停止了G，所以我们必须稍后准备。
 			stopped = true
 
-			s = _Gwaiting
+			s = _Gwaiting // 注：转为_Gwaiting然后走_Gwaiting的流程
 			fallthrough
 
-		case _Grunnable, _Gsyscall, _Gwaiting:
+		case _Grunnable, _Gsyscall, _Gwaiting: // 注：当前未执行的g
 			// Claim goroutine by setting scan bit.
 			// This may race with execution or readying of gp.
 			// The scan bit keeps it from transition state.
-			if !castogscanstatus(gp, s, s|_Gscan) {
+			if !castogscanstatus(gp, s, s|_Gscan) { // 注：增加扫描状态 _Gscan
 				break
 			}
 
@@ -176,6 +195,7 @@ func suspendG(gp *g) suspendGState {
 
 			// The goroutine was already at a safe-point
 			// and we've now locked that in.
+			// 译：goroutine已经处于安全点，我们现在已经锁定了它。
 			//
 			// TODO: It would be much better if we didn't
 			// leave it in _Gscan, but instead gently
@@ -186,45 +206,56 @@ func suspendG(gp *g) suspendGState {
 			// {_Gsyscall,_Gwaiting} -> _Grunning. Maybe
 			// for all those transitions we need to check
 			// suspended and deschedule?
+			// 译：TODO:如果我们不把它留在_Gscan中，而是温和地阻止它的调度，直到恢复，那会更好。
+			// 译：也许我们只使用它来提升挂起的计数，而调度器则跳过挂起的goroutines？
+			// 译：这对于{_Gsyscall，_Gwaiting}->_Grunning来说还不够。
+			// 译：也许对于所有这些转换，我们需要检查暂停和取消计划？
 			return suspendGState{g: gp, stopped: stopped}
 
-		case _Grunning:
+		case _Grunning: // 注：当前运行中的g
 			// Optimization: if there is already a pending preemption request
 			// (from the previous loop iteration), don't bother with the atomics.
+			// 译：优化：如果已经存在挂起的抢占请求（来自上一次循环迭代），不要为原子性而烦恼。
 			if gp.preemptStop && gp.preempt && gp.stackguard0 == stackPreempt && asyncM == gp.m && asyncM.preemptGen.Load() == asyncGen {
 				break
 			}
 
 			// Temporarily block state transitions.
-			if !castogscanstatus(gp, _Grunning, _Gscanrunning) {
+			if !castogscanstatus(gp, _Grunning, _Gscanrunning) { // 注：切换至_Gscanrunning，同时加锁
 				break
 			}
 
 			// Request synchronous preemption.
+			// 译：请求同步抢占。
 			gp.preemptStop = true
 			gp.preempt = true
 			gp.stackguard0 = stackPreempt
 
 			// Prepare for asynchronous preemption.
+			// 译：准备异步抢占。
 			asyncM2 := gp.m
 			asyncGen2 := asyncM2.preemptGen.Load()
 			needAsync := asyncM != asyncM2 || asyncGen != asyncGen2
 			asyncM = asyncM2
 			asyncGen = asyncGen2
 
-			casfrom_Gscanstatus(gp, _Gscanrunning, _Grunning)
+			casfrom_Gscanstatus(gp, _Gscanrunning, _Grunning) // 注：切换至_Grunning，同时释放锁
 
 			// Send asynchronous preemption. We do this
 			// after CASing the G back to _Grunning
 			// because preemptM may be synchronous and we
 			// don't want to catch the G just spinning on
 			// its status.
+			// 译：发送异步抢占。我们在将G CASing返回_Grunning之后这样做，
+			// 译：因为preemptM可能是同步的，并且我们不想捕捉到G只是在其状态上旋转。
 			if preemptMSupported && debug.asyncpreemptoff == 0 && needAsync {
 				// Rate limit preemptM calls. This is
 				// particularly important on Windows
 				// where preemptM is actually
 				// synchronous and the spin loop here
 				// can lead to live-lock.
+				// 译：速率限制抢占M个呼叫。这在Windows上尤其重要，
+				// 译：因为preemptM实际上是同步的，这里的旋转循环可能导致实时锁定。
 				now := nanotime()
 				if now >= nextPreemptM {
 					nextPreemptM = now + yieldDelay/2

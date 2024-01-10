@@ -344,20 +344,26 @@ func badPointer(s *mspan, p, refBase, refOff uintptr) {
 // findObject returns the base address for the heap object containing
 // the address p, the object's span, and the index of the object in s.
 // If p does not point into a heap object, it returns base == 0.
+// 译：findObject返回堆对象的基地址，其中包含地址p、对象的span和以s为单位的对象索引。
+// 译：如果p没有指向堆对象，则返回base==0。
 //
 // If p points is an invalid heap pointer and debug.invalidptr != 0,
 // findObject panics.
+// 译：如果p点是无效的堆指针，并且debug.invalidptr!=0，findObject panic。
 //
 // refBase and refOff optionally give the base address of the object
 // in which the pointer p was found and the byte offset at which it
 // was found. These are used for error reporting.
+// 译：refBase和refOff可选地给出在其中找到指针p的对象的基地址以及找到指针p时的字节偏移量。这些用于错误报告。
 //
 // It is nosplit so it is safe for p to be a pointer to the current goroutine's stack.
 // Since p is a uintptr, it would not be adjusted if the stack were to move.
+// 译：它是非拆分的，所以p作为指向当前goroutine堆栈的指针是安全的。
+// 译：由于p是uintptr，因此如果堆栈要移动，则不会对其进行调整。
 //
 //go:nosplit
 func findObject(p, refBase, refOff uintptr) (base uintptr, s *mspan, objIndex uintptr) {
-	s = spanOf(p)
+	s = spanOf(p) // 注：取得p所在的span
 	// If s is nil, the virtual address has never been part of the heap.
 	// This pointer may be to some mmap'd region, so we allow it.
 	if s == nil {
@@ -374,8 +380,9 @@ func findObject(p, refBase, refOff uintptr) (base uintptr, s *mspan, objIndex ui
 	// Check s.state to synchronize with span initialization
 	// before checking other fields. See also spanOfHeap.
 	if state := s.state.get(); state != mSpanInUse || p < s.base() || p >= s.limit {
+		// 注：如果p不是span的有效地址，或者span的状态不是gc堆
 		// Pointers into stacks are also ok, the runtime manages these explicitly.
-		if state == mSpanManual {
+		if state == mSpanManual { // 注：是手动分配span，如栈等
 			return
 		}
 		// The following ensures that we are rigorous about what data
@@ -565,7 +572,8 @@ func bulkBarrierPreWrite(dst, src, size uintptr) {
 	if !writeBarrier.needed {
 		return
 	}
-	if s := spanOf(dst); s == nil {
+	// 注：根据目标地址取得目标指针所在的span
+	if s := spanOf(dst); s == nil { // 注：如果span不存在，那么尝试按照全局对象处理，需要检查是否在全局对象的地址空间
 		// If dst is a global, use the data or BSS bitmaps to
 		// execute write barriers.
 		for _, datap := range activeModules() {
@@ -593,15 +601,15 @@ func bulkBarrierPreWrite(dst, src, size uintptr) {
 
 	buf := &getg().m.p.ptr().wbBuf
 	h := heapBitsForAddr(dst, size)
-	if src == 0 {
+	if src == 0 { // 注：删除？
 		for {
 			var addr uintptr
 			if h, addr = h.next(); addr == 0 {
 				break
 			}
 			dstx := (*uintptr)(unsafe.Pointer(addr))
-			if !buf.putFast(*dstx, 0) {
-				wbBufFlush(nil, 0)
+			if !buf.putFast(*dstx, 0) { // 注：一次放入两个元素, false表示满了
+				wbBufFlush(nil, 0) // 注：buffer满了则触发flush
 			}
 		}
 	} else {

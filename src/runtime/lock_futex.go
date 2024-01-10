@@ -167,6 +167,7 @@ func notesleep(n *note) {
 
 // May run with m.p==nil if called from notetsleep, so write barriers
 // are not allowed.
+// 译：如果从notetsleep调用，则可能使用m.p==nil运行，因此不允许写入障碍。
 //
 //go:nosplit
 //go:nowritebarrier
@@ -227,6 +228,8 @@ func notetsleep(n *note, ns int64) bool {
 
 // same as runtime·notetsleep, but called on user g (not g0)
 // calls only nosplit functions between entersyscallblock/exitsyscall.
+// 译：与runtime·notesleep相同，但在用户g（而非g0）上调用，
+// 译：在entersyscallblock/exitsyscall之间仅调用nosplit函数。
 func notetsleepg(n *note, ns int64) bool {
 	gp := getg()
 	if gp == gp.m.g0 {

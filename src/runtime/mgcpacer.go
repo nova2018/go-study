@@ -382,6 +382,7 @@ func (c *gcControllerState) init(gcPercent int32, memoryLimit int64) {
 // startCycle resets the GC controller's state and computes estimates
 // for a new GC cycle. The caller must hold worldsema and the world
 // must be stopped.
+// 译：startCycle重置GC控制器的状态并计算新GC周期的估计值。呼叫者必须持有WorldSema锁，世界必须停止。
 func (c *gcControllerState) startCycle(markStartTime int64, procs int, trigger gcTrigger) {
 	c.heapScanWork.Store(0)
 	c.stackScanWork.Store(0)
@@ -399,15 +400,33 @@ func (c *gcControllerState) startCycle(markStartTime int64, procs int, trigger g
 	// dedicated workers so that the utilization is closest to
 	// 25%. For small GOMAXPROCS, this would introduce too much
 	// error, so we add fractional workers in that case.
+	// 译：计算背景标记利用率目标。在一般情况下，这可能不完全出来。
+	// 译：我们四舍五入专职工作人员的数量，使利用率最接近25%。
+	// 译：对于小的GOMAXPROCS，这会引入太多的错误，所以我们在这种情况下添加小数工作者。
 	totalUtilizationGoal := float64(procs) * gcBackgroundUtilization
 	dedicatedMarkWorkersNeeded := int64(totalUtilizationGoal + 0.5)
 	utilError := float64(dedicatedMarkWorkersNeeded)/totalUtilizationGoal - 1
+	// 注：utilError = floor(procs*0.25+0.5)/(procs*0.25)-1
+	// 注：procs=4x+n(x为大于等于0的整数, n=0,1,2,3)
+	// 注：若n=0，即procs=4x+0，则utilError=x/x-1=0
+	// 注：若n=1，即procs=4x+1，则utilError=floor(x+0.75)/(x+0.25)-1=x/(x+0.25)-1=-0.25/(x+0.25)=-1/(4x+1) = -1/procs
+	// 注：若n=2，即procs=4x+2，则utilError=floor(x+0.5+0.5)/(x+0.5)-1=0.5/(x+0.5)=2/(4x+2) = 2/procs
+	// 注：若n=3，即procs=4x+3，则utilError=floor(x+0.75+0.5)/(x+0.75)-1=0.25/(x+0.75)=1/(4x+3) = 1/procs
 	const maxUtilError = 0.3
 	if utilError < -maxUtilError || utilError > maxUtilError {
+		// 注：utilError < -0.3 || utilError > 0.3, 即
+		// 注：-1/procs < -0.3 => 1/procs > 0.3 => procs < 3.33 => procs <= 3 => procs = 1
+		// 注：2/procs > 0.3 = 3/10 => procs < 20/3 = 6.67 => procs = 2, 6
+		// 注：1/procs > 0.3 => procs < 10/3 = 3.33 => procs = 3
+		// 注：因此，procs = 1,2,3,6  => GOMAXPROCS<=3 or GOMAXPROCS=6
+
 		// Rounding put us more than 30% off our goal. With
 		// gcBackgroundUtilization of 25%, this happens for
 		// GOMAXPROCS<=3 or GOMAXPROCS=6. Enable fractional
 		// workers to compensate.
+		// 译：四舍五入使我们的目标偏离了30%以上。
+		// 译：当gcBackgroundUtilization为25%时，GOMAXPROCS<=3或GOMAXPROCS=6会发生这种情况。
+		// 译：允许零工进行补偿。
 		if float64(dedicatedMarkWorkersNeeded) > totalUtilizationGoal {
 			// Too many dedicated workers.
 			dedicatedMarkWorkersNeeded--
@@ -738,7 +757,7 @@ func (c *gcControllerState) findRunnableGCWorker(pp *p, now int64) (*g, int64) {
 		gcCPULimiter.update(now)
 	}
 
-	if !gcMarkWorkAvailable(pp) {
+	if !gcMarkWorkAvailable(pp) { // 注：是否需要gc任务
 		// No work to be done right now. This can happen at
 		// the end of the mark phase when there are still
 		// assists tapering off. Don't bother running a worker
@@ -747,7 +766,7 @@ func (c *gcControllerState) findRunnableGCWorker(pp *p, now int64) (*g, int64) {
 	}
 
 	// Grab a worker before we commit to running below.
-	node := (*gcBgMarkWorkerNode)(gcBgMarkWorkerPool.pop())
+	node := (*gcBgMarkWorkerNode)(gcBgMarkWorkerPool.pop()) // 注：获取一个任务
 	if node == nil {
 		// There is at least one worker per P, so normally there are
 		// enough workers to run on all Ps, if necessary. However, once
@@ -776,10 +795,11 @@ func (c *gcControllerState) findRunnableGCWorker(pp *p, now int64) (*g, int64) {
 		}
 	}
 
+	// 注：计算gc任务模式
 	if decIfPositive(&c.dedicatedMarkWorkersNeeded) {
 		// This P is now dedicated to marking until the end of
 		// the concurrent mark phase.
-		pp.gcMarkWorkerMode = gcMarkWorkerDedicatedMode
+		pp.gcMarkWorkerMode = gcMarkWorkerDedicatedMode // 注：专属模式
 	} else if c.fractionalUtilizationGoal == 0 {
 		// No need for fractional workers.
 		gcBgMarkWorkerPool.push(&node.node)
@@ -796,11 +816,11 @@ func (c *gcControllerState) findRunnableGCWorker(pp *p, now int64) (*g, int64) {
 			return nil, now
 		}
 		// Run a fractional worker.
-		pp.gcMarkWorkerMode = gcMarkWorkerFractionalMode
+		pp.gcMarkWorkerMode = gcMarkWorkerFractionalMode // 注：分时模式
 	}
 
 	// Run the background mark worker.
-	gp := node.gp.ptr()
+	gp := node.gp.ptr() // 注：取得任务中的g，即gc任务
 	casgstatus(gp, _Gwaiting, _Grunnable)
 	if trace.enabled {
 		traceGoUnpark(gp, 0)

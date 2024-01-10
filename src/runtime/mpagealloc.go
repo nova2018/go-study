@@ -55,7 +55,7 @@ const (
 	// The size of a bitmap chunk, i.e. the amount of bits (that is, pages) to consider
 	// in the bitmap at once.
 	pallocChunkPages    = 1 << logPallocChunkPages
-	pallocChunkBytes    = pallocChunkPages * pageSize
+	pallocChunkBytes    = pallocChunkPages * pageSize // 注：4M
 	logPallocChunkPages = 9
 	logPallocChunkBytes = logPallocChunkPages + pageShift
 

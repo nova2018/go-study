@@ -82,7 +82,7 @@ package runtime
 //      8192    13         32768
 
 const (
-	_MaxSmallSize   = 32768
+	_MaxSmallSize   = 32768 // 注：32k
 	smallSizeDiv    = 8
 	smallSizeMax    = 1024
 	largeSizeDiv    = 128

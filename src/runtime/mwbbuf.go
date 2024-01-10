@@ -146,7 +146,7 @@ func (b *wbBuf) putFast(old, new uintptr) bool {
 	p[0] = old
 	p[1] = new
 	b.next += 2 * goarch.PtrSize
-	return b.next != b.end
+	return b.next != b.end // 注：true表示未满，false表示满？
 }
 
 // wbBufFlush flushes the current P's write barrier buffer to the GC
@@ -216,7 +216,7 @@ func wbBufFlush1(pp *p) {
 	// Get the buffered pointers.
 	start := uintptr(unsafe.Pointer(&pp.wbBuf.buf[0]))
 	n := (pp.wbBuf.next - start) / unsafe.Sizeof(pp.wbBuf.buf[0])
-	ptrs := pp.wbBuf.buf[:n]
+	ptrs := pp.wbBuf.buf[:n] // 注：提取全部指针
 
 	// Poison the buffer to make extra sure nothing is enqueued
 	// while we're processing the buffer.
@@ -246,9 +246,9 @@ func wbBufFlush1(pp *p) {
 	// buffer, or just track globally whether there are any
 	// un-shaded stacks and flush after each stack scan.
 	gcw := &pp.gcw
-	pos := 0
+	pos := 0 // 注：慢指针，用以保存有指针对象
 	for _, ptr := range ptrs {
-		if ptr < minLegalPointer {
+		if ptr < minLegalPointer { // 注：小于4096的地址为保留地址，不处理
 			// nil pointers are very common, especially
 			// for the "old" values. Filter out these and
 			// other "obvious" non-heap pointers ASAP.
@@ -279,12 +279,12 @@ func wbBufFlush1(pp *p) {
 			gcw.bytesMarked += uint64(span.elemsize)
 			continue
 		}
-		ptrs[pos] = obj
+		ptrs[pos] = obj // 注: 拷贝有指针对象
 		pos++
 	}
 
 	// Enqueue the greyed objects.
-	gcw.putBatch(ptrs[:pos])
+	gcw.putBatch(ptrs[:pos]) // 注：将有指针对象推送入扫描队列标灰
 
 	pp.wbBuf.reset()
 }

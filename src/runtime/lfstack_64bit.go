@@ -27,7 +27,7 @@ const (
 	// In addition to the 16 bits taken from the top, we can take 3 from the
 	// bottom, because node must be pointer-aligned, giving a total of 19 bits
 	// of count.
-	cntBits = 64 - addrBits + 3
+	cntBits = 64 - addrBits + 3 // 注：cntBits=19
 
 	// On AIX, 64-bit addresses are split into 36-bit segment number and 28-bit
 	// offset in segment.  Segment numbers in the range 0x0A0000000-0x0AFFFFFFF(LSA)

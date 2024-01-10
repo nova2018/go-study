@@ -12,13 +12,17 @@ import (
 )
 
 // lfstack is the head of a lock-free stack.
+// 译：lfstack是无锁堆栈的头。
 //
 // The zero value of lfstack is an empty list.
+// 译：lfstack的零值是一个空列表。
 //
 // This stack is intrusive. Nodes must embed lfnode as the first field.
+// 译：此堆栈具有侵入性。节点必须嵌入lfnode作为第一个字段。
 //
 // The stack does not keep GC-visible pointers to nodes, so the caller
 // must ensure the nodes are allocated outside the Go heap.
+// 译：堆栈不保留指向节点的GC可见指针，因此调用方必须确保在Go堆之外分配节点。
 type lfstack uint64
 
 func (head *lfstack) push(node *lfnode) {

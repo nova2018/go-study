@@ -115,7 +115,7 @@ const (
 	maxSmallSize  = _MaxSmallSize
 
 	pageShift = _PageShift
-	pageSize  = _PageSize
+	pageSize  = _PageSize // 注：8K
 
 	concurrentSweep = _ConcurrentSweep
 
@@ -146,7 +146,7 @@ const (
 	//   windows/32       | 4KB        | 3
 	//   windows/64       | 8KB        | 2
 	//   plan9            | 4KB        | 3
-	_NumStackOrders = 4 - goarch.PtrSize/4*goos.IsWindows - 1*goos.IsPlan9
+	_NumStackOrders = 4 - goarch.PtrSize/4*goos.IsWindows - 1*goos.IsPlan9 // 注：4
 
 	// heapAddrBits is the number of bits in a heap address. On
 	// amd64, addresses are sign-extended beyond heapAddrBits. On
@@ -1164,9 +1164,10 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	// a race marking the bit.
 	// 译：GC时分配黑色。所有插槽均为空，因此无需扫描。
 	// 译：这可能与GC的竞争，所以如果可以有一场竞赛来标记位，那么就以原子的方式进行。
-	if gcphase != _GCoff {
+	if gcphase != _GCoff { // 注：gc期间
 		// 注：先赋予span.freeIndexForScan所以才引起的竞争？
-		gcmarknewobject(span, uintptr(x), size) // 注：写屏障？
+		gcmarknewobject(span, uintptr(x), size) // 注：gc期间，所有的新对象都是黑色的
+		// 注：即使是勿标影响也不大，下一轮gc也会完成清理
 	}
 
 	if raceenabled {

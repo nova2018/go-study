@@ -30,29 +30,44 @@ func init() {
 }
 
 // Garbage collector work pool abstraction.
+// 译：垃圾收集器工作池抽象。
 //
 // This implements a producer/consumer model for pointers to grey
 // objects. A grey object is one that is marked and on a work
 // queue. A black object is marked and not on a work queue.
+// 译：这实现了指向灰色对象的指针的生产者/消费者模型。
+// 译：灰色对象是已标记并位于工作队列上的对象。
+// 译：黑色对象已标记且不在工作队列中。
 //
 // Write barriers, root discovery, stack scanning, and object scanning
 // produce pointers to grey objects. Scanning consumes pointers to
 // grey objects, thus blackening them, and then scans them,
 // potentially producing new pointers to grey objects.
+// 译：写屏障、根发现、栈扫描和对象扫描会产生指向灰色对象的指针。扫描会消耗指向灰色对象的指针，
+// 译：从而使它们变黑，然后扫描它们，可能会产生指向灰色对象的新指针。
 
 // A gcWork provides the interface to produce and consume work for the
 // garbage collector.
+// 译：gcWork为垃圾收集器提供产生和使用工作的接口。
 //
 // A gcWork can be used on the stack as follows:
+// 译：可以在堆栈上使用gcWork，如下所示：
 //
 //	(preemption must be disabled)
 //	gcw := &getg().m.p.ptr().gcw
 //	.. call gcw.put() to produce and gcw.tryGet() to consume ..
 //
+// 译：(必须禁用抢占)
+// 译：gcw：=&getg().m.p.ptr().gcw
+// 译：..调用gcw.put()进行生产，调用gcw.tryGet()进行消费..
+//
 // It's important that any use of gcWork during the mark phase prevent
 // the garbage collector from transitioning to mark termination since
 // gcWork may locally hold GC work buffers. This can be done by
 // disabling preemption (systemstack or acquirem).
+// 译：重要的是，在标记阶段使用gcWork可以防止垃圾收集器转换为标记终止，
+// 译：因为gcWork可能在本地保存GC工作缓冲区。
+// 译：这可以通过禁用抢占(系统堆栈或获取)来实现。
 type gcWork struct {
 	// wbuf1 and wbuf2 are the primary and secondary work buffers.
 	//
@@ -72,7 +87,7 @@ type gcWork struct {
 	// next.
 	//
 	// Invariant: Both wbuf1 and wbuf2 are nil or neither are.
-	wbuf1, wbuf2 *workbuf
+	wbuf1, wbuf2 *workbuf // 注：wbuf1负责push和pop，wbuf2作为buffer
 
 	// Bytes marked (blackened) on this gcWork. This is aggregated
 	// into work.bytesMarked by dispose.
@@ -81,6 +96,8 @@ type gcWork struct {
 	// Heap scan work performed on this gcWork. This is aggregated into
 	// gcController by dispose and may also be flushed by callers.
 	// Other types of scan work are flushed immediately.
+	// 译：在此gcWork上执行的堆扫描工作。它由dispose聚合到gcController中，
+	// 译：也可以由调用者刷新。其他类型的扫描工作会立即刷新。
 	heapScanWork int64
 
 	// flushedWork indicates that a non-empty work buffer was
@@ -121,11 +138,11 @@ func (w *gcWork) put(obj uintptr) {
 		w.init()
 		wbuf = w.wbuf1
 		// wbuf is empty at this point.
-	} else if wbuf.nobj == len(wbuf.obj) {
-		w.wbuf1, w.wbuf2 = w.wbuf2, w.wbuf1
+	} else if wbuf.nobj == len(wbuf.obj) { // 注：wbuf1满了
+		w.wbuf1, w.wbuf2 = w.wbuf2, w.wbuf1 // 注：尝试wbuf1和wbuf2交换
 		wbuf = w.wbuf1
-		if wbuf.nobj == len(wbuf.obj) {
-			putfull(wbuf)
+		if wbuf.nobj == len(wbuf.obj) { // 注：wbuf1还是满的
+			putfull(wbuf) // 注：将wbuf1交给全局队列，并获取一个空的wbuf
 			w.flushedWork = true
 			wbuf = getempty()
 			w.wbuf1 = wbuf
@@ -149,7 +166,7 @@ func (w *gcWork) put(obj uintptr) {
 // otherwise it returns false and the caller needs to call put.
 //
 //go:nowritebarrierrec
-func (w *gcWork) putFast(obj uintptr) bool {
+func (w *gcWork) putFast(obj uintptr) bool { // 注：向wbuf1写入一个指针
 	wbuf := w.wbuf1
 	if wbuf == nil || wbuf.nobj == len(wbuf.obj) {
 		return false
@@ -178,13 +195,13 @@ func (w *gcWork) putBatch(obj []uintptr) {
 
 	for len(obj) > 0 {
 		for wbuf.nobj == len(wbuf.obj) {
-			putfull(wbuf)
+			putfull(wbuf) // 注：将wbuf1交给全局队列
 			w.flushedWork = true
 			w.wbuf1, w.wbuf2 = w.wbuf2, getempty()
 			wbuf = w.wbuf1
 			flushed = true
 		}
-		n := copy(wbuf.obj[wbuf.nobj:], obj)
+		n := copy(wbuf.obj[wbuf.nobj:], obj) // 注：将指针写入wbuf1
 		wbuf.nobj += n
 		obj = obj[n:]
 	}
@@ -208,10 +225,10 @@ func (w *gcWork) tryGet() uintptr {
 		wbuf = w.wbuf1
 		// wbuf is empty at this point.
 	}
-	if wbuf.nobj == 0 {
-		w.wbuf1, w.wbuf2 = w.wbuf2, w.wbuf1
+	if wbuf.nobj == 0 { // 注：wbuf1是空的
+		w.wbuf1, w.wbuf2 = w.wbuf2, w.wbuf1 // 注：wbuf1和wbuf2交换
 		wbuf = w.wbuf1
-		if wbuf.nobj == 0 {
+		if wbuf.nobj == 0 { // 注：wbuf1依然是空的，则从全局队列取一个，将当前wbuf放入全局空闲队列
 			owbuf := wbuf
 			wbuf = trygetfull()
 			if wbuf == nil {
@@ -231,7 +248,7 @@ func (w *gcWork) tryGet() uintptr {
 // the caller is expected to call tryGet().
 //
 //go:nowritebarrierrec
-func (w *gcWork) tryGetFast() uintptr {
+func (w *gcWork) tryGetFast() uintptr { // 注：从wbuf1取一个指针
 	wbuf := w.wbuf1
 	if wbuf == nil || wbuf.nobj == 0 {
 		return 0
@@ -248,7 +265,7 @@ func (w *gcWork) tryGetFast() uintptr {
 // ability to hide pointers during the concurrent mark phase.
 //
 //go:nowritebarrierrec
-func (w *gcWork) dispose() {
+func (w *gcWork) dispose() { // 注：强制flush，将空buf放入空队列，其他放入满队列
 	if wbuf := w.wbuf1; wbuf != nil {
 		if wbuf.nobj == 0 {
 			putempty(wbuf)
@@ -285,7 +302,7 @@ func (w *gcWork) dispose() {
 // global queue.
 //
 //go:nowritebarrierrec
-func (w *gcWork) balance() {
+func (w *gcWork) balance() { // 注：均衡，将wbuf2放入满队列，如果wbuf2为空，则从wbuf1中取一半
 	if w.wbuf1 == nil {
 		return
 	}
@@ -352,7 +369,7 @@ func (b *workbuf) checkempty() {
 func getempty() *workbuf {
 	var b *workbuf
 	if work.empty != 0 {
-		b = (*workbuf)(work.empty.pop())
+		b = (*workbuf)(work.empty.pop()) // 注：从empty列表中取一个空的
 		if b != nil {
 			b.checkempty()
 		}
@@ -361,12 +378,12 @@ func getempty() *workbuf {
 	// allocate a workbuf.
 	lockWithRankMayAcquire(&work.wbufSpans.lock, lockRankWbufSpans)
 	lockWithRankMayAcquire(&mheap_.lock, lockRankMheap)
-	if b == nil {
+	if b == nil { // 注：如果没有空的
 		// Allocate more workbufs.
 		var s *mspan
-		if work.wbufSpans.free.first != nil {
+		if work.wbufSpans.free.first != nil { // 注：空闲列表存在，则复用
 			lock(&work.wbufSpans.lock)
-			s = work.wbufSpans.free.first
+			s = work.wbufSpans.free.first // 注：取一个空闲的span，将其变为忙碌
 			if s != nil {
 				work.wbufSpans.free.remove(s)
 				work.wbufSpans.busy.insert(s)
@@ -375,23 +392,23 @@ func getempty() *workbuf {
 		}
 		if s == nil {
 			systemstack(func() {
-				s = mheap_.allocManual(workbufAlloc/pageSize, spanAllocWorkBuf)
+				s = mheap_.allocManual(workbufAlloc/pageSize, spanAllocWorkBuf) // 注：从堆中获取一块手动维护的span，非GC堆
 			})
 			if s == nil {
 				throw("out of memory")
 			}
 			// Record the new span in the busy list.
 			lock(&work.wbufSpans.lock)
-			work.wbufSpans.busy.insert(s)
+			work.wbufSpans.busy.insert(s) // 注：立即使用该span
 			unlock(&work.wbufSpans.lock)
 		}
 		// Slice up the span into new workbufs. Return one and
 		// put the rest on the empty list.
-		for i := uintptr(0); i+_WorkbufSize <= workbufAlloc; i += _WorkbufSize {
+		for i := uintptr(0); i+_WorkbufSize <= workbufAlloc; i += _WorkbufSize { // 注：将span全部分配为workbuf
 			newb := (*workbuf)(unsafe.Pointer(s.base() + i))
 			newb.nobj = 0
 			lfnodeValidate(&newb.node)
-			if i == 0 {
+			if i == 0 { // 注：返回第一个元素，其余置入空buf列表
 				b = newb
 			} else {
 				putempty(newb)
@@ -450,6 +467,8 @@ func handoff(b *workbuf) *workbuf {
 // prepareFreeWorkbufs moves busy workbuf spans to free list so they
 // can be freed to the heap. This must only be called when all
 // workbufs are on the empty list.
+// 译：prepareFreeWorkbufs将繁忙的workbuf span移动到空闲列表，以便将它们释放到堆中。
+// 译：只有当所有workbuf都在空列表上时，才必须调用此函数。
 func prepareFreeWorkbufs() {
 	lock(&work.wbufSpans.lock)
 	if work.full != 0 {
@@ -459,7 +478,7 @@ func prepareFreeWorkbufs() {
 	// which ones are in which spans. We can wipe the entire empty
 	// list and move all workbuf spans to the free list.
 	work.empty = 0
-	work.wbufSpans.free.takeAll(&work.wbufSpans.busy)
+	work.wbufSpans.free.takeAll(&work.wbufSpans.busy) // 注：将busy的span放入free列表
 	unlock(&work.wbufSpans.lock)
 }
 
