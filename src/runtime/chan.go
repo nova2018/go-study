@@ -136,7 +136,7 @@ func full(c *hchan) bool {
 	// so it is safe to read at any time during channel operation.
 	if c.dataqsiz == 0 {
 		// Assumes that a pointer read is relaxed-atomic.
-		return c.recvq.first == nil
+		return c.recvq.first == nil // 注：有阻塞的g，则说明非空
 	}
 	// Assumes that a uint read is relaxed-atomic.
 	return c.qcount == c.dataqsiz
@@ -266,7 +266,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	// receiver copies it out. The sudog has a pointer to the
 	// stack object, but sudogs aren't considered as roots of the
 	// stack tracer.
-	KeepAlive(ep) // 注：确保存在对ep的引用
+	KeepAlive(ep) // 注：确保存在对ep的引用，防止gc回收？
 
 	// someone woke us up.
 	if mysg != gp.waiting {
@@ -766,7 +766,7 @@ func reflect_chanclose(c *hchan) {
 	closechan(c)
 }
 
-func (q *waitq) enqueue(sgp *sudog) {
+func (q *waitq) enqueue(sgp *sudog) { // 注：从尾部写入
 	sgp.next = nil
 	x := q.last
 	if x == nil {
@@ -780,7 +780,7 @@ func (q *waitq) enqueue(sgp *sudog) {
 	q.last = sgp
 }
 
-func (q *waitq) dequeue() *sudog {
+func (q *waitq) dequeue() *sudog { // 注：从头部获取
 	for {
 		sgp := q.first
 		if sgp == nil {
