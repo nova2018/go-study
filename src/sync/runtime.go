@@ -55,6 +55,11 @@ func init() {
 
 // Active spinning runtime support.
 // runtime_canSpin reports whether spinning makes sense at the moment.
+// 注：允许自旋的条件，必须全部满足
+// 注：1. 次数小于4
+// 注：2. 核数大于1
+// 注：3. 有空闲的P
+// 注：4. P本地队列为空
 func runtime_canSpin(i int) bool
 
 // runtime_doSpin does active spinning.

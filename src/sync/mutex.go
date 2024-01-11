@@ -129,10 +129,10 @@ func (m *Mutex) lockSlow() {
 			// Try to set mutexWoken flag to inform Unlock
 			// to not wake other blocked goroutines.
 			if !awoke && old&mutexWoken == 0 && old>>mutexWaiterShift != 0 &&
-				atomic.CompareAndSwapInt32(&m.state, old, old|mutexWoken) {
+				atomic.CompareAndSwapInt32(&m.state, old, old|mutexWoken) { // 注：抢到锁
 				awoke = true
 			}
-			runtime_doSpin()
+			runtime_doSpin() // 注：自旋
 			iter++
 			old = m.state
 			continue
@@ -168,7 +168,7 @@ func (m *Mutex) lockSlow() {
 				break // locked the mutex with CAS
 			}
 			// If we were already waiting before, queue at the front of the queue.
-			queueLifo := waitStartTime != 0 // 注：waitStartTime>0，即不是首次执行这里，即曾经获取到锁，但是解锁失败，因此加入队列头部
+			queueLifo := waitStartTime != 0 // 注：waitStartTime>0，即不是首次执行这里，即曾经获取到锁，但是解锁失败(和新的协程竞争失败)，因此加入队列头部
 			if waitStartTime == 0 {
 				waitStartTime = runtime_nanotime()
 			}
