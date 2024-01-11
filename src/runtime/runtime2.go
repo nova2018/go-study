@@ -360,7 +360,7 @@ type sudog struct {
 	// The following fields are protected by the hchan.lock of the
 	// channel this sudog is blocking on. shrinkstack depends on
 	// this for sudogs involved in channel ops.
-	// 译：以下字段受此sudog阻止的频道的hchan.lock保护。
+	// 译：以下字段受此sudog阻止的管道的hchan.lock保护。
 	// 译：对于涉及通道操作的数据，收缩堆栈依赖于此。
 
 	g *g
@@ -471,10 +471,14 @@ type g struct {
 	// pointing into this goroutine's stack. If true, stack
 	// copying needs to acquire channel locks to protect these
 	// areas of the stack.
+	// 译：activeStackChans指示有指向此goroutine堆栈的未锁定通道。
+	// 译：如果为true，堆栈复制需要获取通道锁以保护堆栈的这些区域。
 	activeStackChans bool
 	// parkingOnChan indicates that the goroutine is about to
 	// park on a chansend or chanrecv. Used to signal an unsafe point
 	// for stack shrinking.
+	// 译：parkingOnChan表示goroutine即将在chansend或chanrecv上停车。
+	// 译：用于指示堆栈收缩的不安全点。
 	parkingOnChan atomic.Bool
 
 	raceignore     int8     // ignore race detection events

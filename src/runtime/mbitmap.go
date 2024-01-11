@@ -716,7 +716,7 @@ func bulkBarrierBitmap(dst, src, size, maskOffset uintptr, bits *uint8) {
 // Callers must perform cgo checks if writeBarrier.cgo.
 //
 //go:nosplit
-func typeBitsBulkBarrier(typ *_type, dst, src, size uintptr) {
+func typeBitsBulkBarrier(typ *_type, dst, src, size uintptr) { // 注：写屏障，扫描并提取结构内部的指针数据加入写屏障buffer
 	if typ == nil {
 		throw("runtime: typeBitsBulkBarrier without type")
 	}
@@ -728,23 +728,23 @@ func typeBitsBulkBarrier(typ *_type, dst, src, size uintptr) {
 		println("runtime: typeBitsBulkBarrier with type ", typ.string(), " with GC prog")
 		throw("runtime: invalid typeBitsBulkBarrier")
 	}
-	if !writeBarrier.needed {
+	if !writeBarrier.needed { // 注：写屏障未开始
 		return
 	}
 	ptrmask := typ.gcdata
 	buf := &getg().m.p.ptr().wbBuf
 	var bits uint32
-	for i := uintptr(0); i < typ.ptrdata; i += goarch.PtrSize {
-		if i&(goarch.PtrSize*8-1) == 0 {
+	for i := uintptr(0); i < typ.ptrdata; i += goarch.PtrSize { // 注：检查结构内部指针
+		if i&(goarch.PtrSize*8-1) == 0 { // 注：每次提取8位
 			bits = uint32(*ptrmask)
 			ptrmask = addb(ptrmask, 1)
 		} else {
 			bits = bits >> 1
 		}
-		if bits&1 != 0 {
+		if bits&1 != 0 { // 注：检查当前位是否为指针
 			dstx := (*uintptr)(unsafe.Pointer(dst + i))
 			srcx := (*uintptr)(unsafe.Pointer(src + i))
-			if !buf.putFast(*dstx, *srcx) {
+			if !buf.putFast(*dstx, *srcx) { // 注：提取指针，加入写屏障buffer
 				wbBufFlush(nil, 0)
 			}
 		}
