@@ -45,7 +45,7 @@ type Once struct {
 //
 // If f panics, Do considers it to have returned; future calls of Do return
 // without calling f.
-func (o *Once) Do(f func()) {
+func (o *Once) Do(f func()) { // 注：计数器+锁保证唯一性
 	// Note: Here is an incorrect implementation of Do:
 	//
 	//	if atomic.CompareAndSwapUint32(&o.done, 0, 1) {

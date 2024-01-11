@@ -365,8 +365,8 @@ type sudog struct {
 
 	g *g
 
-	next *sudog
-	prev *sudog
+	next *sudog         // 注：信号模式下，是树的right，next和prev是两个叶子结点
+	prev *sudog         // 注：信号模式下，是树的left
 	elem unsafe.Pointer // data element (may point to stack)
 
 	// The following fields are never accessed concurrently.
@@ -389,8 +389,8 @@ type sudog struct {
 	success bool
 
 	parent   *sudog // semaRoot binary tree
-	waitlink *sudog // g.waiting list or semaRoot
-	waittail *sudog // semaRoot
+	waitlink *sudog // 注：下一个，next // g.waiting list or semaRoot
+	waittail *sudog // 注：最后一个，last // semaRoot
 	c        *hchan // channel
 }
 

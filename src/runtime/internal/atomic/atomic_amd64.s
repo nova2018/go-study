@@ -89,7 +89,7 @@ TEXT ·Xadd(SB), NOSPLIT, $0-20
 	MOVL	delta+8(FP), AX
 	MOVL	AX, CX
 	LOCK
-	XADDL	AX, 0(BX)
+	XADDL	AX, 0(BX) // 注：保证原子性，修改后 0(BX)=0(BX)+AX, AX=0(BX)
 	ADDL	CX, AX
 	MOVL	AX, ret+16(FP)
 	RET

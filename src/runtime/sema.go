@@ -39,7 +39,7 @@ import (
 // BenchmarkSemTable/OneAddrCollision/* for a benchmark that exercises this.
 type semaRoot struct {
 	lock  mutex
-	treap *sudog        // root of balanced tree of unique waiters.
+	treap *sudog        // 注：平衡树的根 // root of balanced tree of unique waiters.
 	nwait atomic.Uint32 // Number of waiters. Read w/o the lock.
 }
 
@@ -184,7 +184,7 @@ func semrelease(addr *uint32) {
 
 func semrelease1(addr *uint32, handoff bool, skipframes int) {
 	root := semtable.rootFor(addr)
-	atomic.Xadd(addr, 1)
+	atomic.Xadd(addr, 1) // 注：信号量+1
 
 	// Easy case: no waiters?
 	// This check must happen after the xadd, to avoid a missed wakeup
@@ -195,13 +195,13 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 
 	// Harder case: search for a waiter and wake it.
 	lockWithRank(&root.lock, lockRankRoot)
-	if root.nwait.Load() == 0 {
+	if root.nwait.Load() == 0 { // 注：没有waiter，直接结束
 		// The count is already consumed by another goroutine,
 		// so no need to wake up another goroutine.
 		unlock(&root.lock)
 		return
 	}
-	s, t0 := root.dequeue(addr)
+	s, t0 := root.dequeue(addr) // 注：取一个sudog
 	if s != nil {
 		root.nwait.Add(-1)
 	}
@@ -217,7 +217,7 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 		if handoff && cansemacquire(addr) {
 			s.ticket = 1
 		}
-		readyWithTime(s, 5+skipframes)
+		readyWithTime(s, 5+skipframes) // 注：唤醒g
 		if s.ticket == 1 && getg().m.locks == 0 {
 			// Direct G handoff
 			// readyWithTime has added the waiter G as runnext in the
@@ -235,7 +235,16 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 			// regime, and then we start to do direct handoffs of ticket and
 			// P.
 			// See issue 33747 for discussion.
-			goyield()
+			// 译：直接G切换。
+			// 译：readyWithTime已经将waiter G添加为当前P中的runNext；
+			// 译：我们现在调用调度程序，以便立即开始运行waiterG。
+			// 译：请注意，waiter 继承了我们的时间片：这是为了避免无限期地争用高度争用的信号量。
+			// 译：goyield类似于Gosched，但它会发出一个“Preempted”跟踪事件，更重要的是，
+			// 译：它会将当前的G放在本地队列中，而不是全局队列中。我们只在饥饿状态下执行此操作(handoff=true)，
+			// 译：因为在非饥饿状态下，当我们正在生产/调度时，可能会有不同的waiter获取信号量，这将是浪费的。
+			// 译：相反，我们等待进入饥饿状态，然后我们开始直接交接门票和P。
+			// 译：请参阅问题33747进行讨论。
+			goyield() // 注：进行g切换
 		}
 	}
 }
@@ -262,9 +271,9 @@ func (root *semaRoot) queue(addr *uint32, s *sudog, lifo bool) {
 	var last *sudog
 	pt := &root.treap
 	for t := *pt; t != nil; t = *pt {
-		if t.elem == unsafe.Pointer(addr) {
+		if t.elem == unsafe.Pointer(addr) { // 注：列表中信号量已存在
 			// Already have addr in list.
-			if lifo {
+			if lifo { // 注：lifo模式，加入头部，先入后出
 				// Substitute s in t's place in treap.
 				*pt = s
 				s.ticket = t.ticket
@@ -288,7 +297,7 @@ func (root *semaRoot) queue(addr *uint32, s *sudog, lifo bool) {
 				t.prev = nil
 				t.next = nil
 				t.waittail = nil
-			} else {
+			} else { // 注：非lifo模式，加入尾部，先入先出
 				// Add s to end of t's wait list.
 				if t.waittail == nil {
 					t.waitlink = s
@@ -319,12 +328,12 @@ func (root *semaRoot) queue(addr *uint32, s *sudog, lifo bool) {
 	//
 	// s.ticket compared with zero in couple of places, therefore set lowest bit.
 	// It will not affect treap's quality noticeably.
-	s.ticket = fastrand() | 1
-	s.parent = last
+	s.ticket = fastrand() | 1 // 注：没有找到，则新增叶子节点
+	s.parent = last           // 注：加入树
 	*pt = s
 
 	// Rotate up into tree according to ticket (priority).
-	for s.parent != nil && s.parent.ticket > s.ticket {
+	for s.parent != nil && s.parent.ticket > s.ticket { // 注：树排序
 		if s.parent.prev == s {
 			root.rotateRight(s.parent)
 		} else {
@@ -343,7 +352,7 @@ func (root *semaRoot) queue(addr *uint32, s *sudog, lifo bool) {
 func (root *semaRoot) dequeue(addr *uint32) (found *sudog, now int64) {
 	ps := &root.treap
 	s := *ps
-	for ; s != nil; s = *ps {
+	for ; s != nil; s = *ps { // 注：搜索树
 		if s.elem == unsafe.Pointer(addr) {
 			goto Found
 		}
@@ -355,14 +364,14 @@ func (root *semaRoot) dequeue(addr *uint32) (found *sudog, now int64) {
 	}
 	return nil, 0
 
-Found:
+Found: // 注：找到了信号量链表
 	now = int64(0)
 	if s.acquiretime != 0 {
 		now = cputicks()
 	}
-	if t := s.waitlink; t != nil {
+	if t := s.waitlink; t != nil { // 注：存在多个元素，不要删除当前节点
 		// Substitute t, also waiting on addr, for s in root tree of unique addrs.
-		*ps = t
+		*ps = t // 注：将下一个元素置为首个元素
 		t.ticket = s.ticket
 		t.parent = s.parent
 		t.prev = s.prev
@@ -381,9 +390,9 @@ Found:
 		t.acquiretime = now
 		s.waitlink = nil
 		s.waittail = nil
-	} else {
+	} else { // 注：仅有一个元素，需要删除当前节点
 		// Rotate s down to be leaf of tree for removal, respecting priorities.
-		for s.next != nil || s.prev != nil {
+		for s.next != nil || s.prev != nil { // 注：调整树
 			if s.next == nil || s.prev != nil && s.prev.ticket < s.next.ticket {
 				root.rotateRight(s)
 			} else {
@@ -391,16 +400,17 @@ Found:
 			}
 		}
 		// Remove s, now a leaf.
-		if s.parent != nil {
+		if s.parent != nil { // 注：移除当前节点
 			if s.parent.prev == s {
 				s.parent.prev = nil
 			} else {
 				s.parent.next = nil
 			}
 		} else {
-			root.treap = nil
+			root.treap = nil // 注：如果树为空，则根为空
 		}
 	}
+	// 注：清理结构数据
 	s.parent = nil
 	s.elem = nil
 	s.next = nil

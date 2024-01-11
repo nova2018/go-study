@@ -24,7 +24,7 @@ type WaitGroup struct {
 	noCopy noCopy
 
 	state atomic.Uint64 // 译：高32位是计数器，低32位是等待计数。 // high 32 bits are counter, low 32 bits are waiter count.
-	sema  uint32
+	sema  uint32        // 注：信号量
 }
 
 // Add adds delta, which may be negative, to the WaitGroup counter.

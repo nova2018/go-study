@@ -3648,7 +3648,7 @@ func preemptPark(gp *g) {
 // - puts the current G on the runq of the current P instead of the globrunq
 func goyield() {
 	checkTimeouts()
-	mcall(goyield_m)
+	mcall(goyield_m) // 注：唤醒g加入当前p队列
 }
 
 func goyield_m(gp *g) {
