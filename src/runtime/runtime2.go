@@ -365,8 +365,8 @@ type sudog struct {
 
 	g *g
 
-	next *sudog         // 注：信号模式下，是树的right，next和prev是两个叶子结点
-	prev *sudog         // 注：信号模式下，是树的left
+	next *sudog         // 注：chan模式下，这是链表，信号模式下，是树的right，next和prev是两个叶子结点
+	prev *sudog         // 注：chan模式下，这是链表，信号模式下，是树的left
 	elem unsafe.Pointer // data element (may point to stack)
 
 	// The following fields are never accessed concurrently.
@@ -547,21 +547,21 @@ const (
 )
 
 type m struct {
-	g0      *g     // goroutine with scheduling stack
+	g0      *g     // 注：系统g，提供系统栈 // goroutine with scheduling stack
 	morebuf gobuf  // gobuf arg to morestack
 	divmod  uint32 // div/mod denominator for arm - known to liblink
 	_       uint32 // align next field to 8 bytes
 
 	// Fields not known to debuggers.
-	procid        uint64            // for debuggers, but offset not hard-coded
-	gsignal       *g                // signal-handling g
+	procid        uint64            // 注：线程id // for debuggers, but offset not hard-coded
+	gsignal       *g                // 注：执行信号处理的g // signal-handling g
 	goSigStack    gsignalStack      // Go-allocated signal handling stack
 	sigmask       sigset            // storage for saved signal mask
 	tls           [tlsSlots]uintptr // thread-local storage (for x86 extern register)
 	mstartfn      func()
-	curg          *g       // current running goroutine
+	curg          *g       // 注：当前运行的业务g // current running goroutine
 	caughtsig     guintptr // goroutine running during fatal signal
-	p             puintptr // attached p for executing go code (nil if not executing go code)
+	p             puintptr // 注：当前m持有的p，业务g不能脱离p独立运行 // attached p for executing go code (nil if not executing go code)
 	nextp         puintptr
 	oldp          puintptr // the p that was attached before executing a syscall
 	id            int64
@@ -706,6 +706,9 @@ type p struct {
 	// timerModifiedEarlier status. Because the timer may have been
 	// modified again, there need not be any timer with this value.
 	// This is 0 if there are no timerModifiedEarlier timers.
+	// 译：具有timerModifiedEarlier状态的计时器的已知最早nextwhen字段。
+	// 译：由于计时器可能已被再次修改，因此不需要任何具有此值的计时器。
+	// 译：如果没有timerModifiedEarlier计时器，则此值为0。
 	timerModifiedEarliest atomic.Int64
 
 	// Per-P GC state

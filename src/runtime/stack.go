@@ -99,7 +99,7 @@ const (
 	// a _StackLimit chain of NOSPLIT calls plus _StackSystem
 	// bytes for the OS.
 	// This arithmetic must match that in cmd/internal/objabi/stack.go:StackLimit.
-	_StackGuard = 928*sys.StackGuardMultiplier + _StackSystem
+	_StackGuard = 928*sys.StackGuardMultiplier + _StackSystem // 注：_StackGuard=928=29*32
 
 	// After a stack split check the SP is allowed to be this
 	// many bytes below the stack guard. This saves an instruction
@@ -352,7 +352,7 @@ func stackcache_clear(c *mcache) {
 // resources and must not split the stack.
 //
 //go:systemstack
-func stackalloc(n uint32) stack {
+func stackalloc(n uint32) stack { // 注：分配一个栈空间，必须运行在系统栈
 	// Stackalloc must be called on scheduler stack, so that we
 	// never try to grow the stack during the code that stackalloc runs.
 	// Doing so would cause a deadlock (issue 1547).
@@ -380,10 +380,10 @@ func stackalloc(n uint32) stack {
 	// If we need a stack of a bigger size, we fall back on allocating
 	// a dedicated span.
 	var v unsafe.Pointer
-	if n < _FixedStack<<_NumStackOrders && n < _StackCacheSize {
+	if n < _FixedStack<<_NumStackOrders && n < _StackCacheSize { // 注：n<8k && n<32k
 		order := uint8(0)
 		n2 := n
-		for n2 > _FixedStack {
+		for n2 > _FixedStack { // 注：n2>2048
 			order++
 			n2 >>= 1
 		}
@@ -398,23 +398,23 @@ func stackalloc(n uint32) stack {
 			unlock(&stackpool[order].item.mu)
 		} else {
 			c := thisg.m.p.ptr().mcache
-			x = c.stackcache[order].list
+			x = c.stackcache[order].list // 注：先尝试从p中的mcache中获取
 			if x.ptr() == nil {
-				stackcacherefill(c, order)
+				stackcacherefill(c, order) // 注：如果mcache空了，则从全局队列中获取
 				x = c.stackcache[order].list
 			}
 			c.stackcache[order].list = x.ptr().next
 			c.stackcache[order].size -= uintptr(n)
 		}
 		v = unsafe.Pointer(x)
-	} else {
+	} else { // 注：大栈的分配
 		var s *mspan
 		npage := uintptr(n) >> _PageShift
-		log2npage := stacklog2(npage)
+		log2npage := stacklog2(npage) // 注：以2为底取对数
 
 		// Try to get a stack from the large stack cache.
 		lock(&stackLarge.lock)
-		if !stackLarge.free[log2npage].isEmpty() {
+		if !stackLarge.free[log2npage].isEmpty() { // 注：尝试从全局队列中获取
 			s = stackLarge.free[log2npage].first
 			stackLarge.free[log2npage].remove(s)
 		}
@@ -424,7 +424,7 @@ func stackalloc(n uint32) stack {
 
 		if s == nil {
 			// Allocate a new stack from the heap.
-			s = mheap_.allocManual(npage, spanAllocStack)
+			s = mheap_.allocManual(npage, spanAllocStack) // 注：直接取堆中进行分配
 			if s == nil {
 				throw("out of memory")
 			}
@@ -455,7 +455,7 @@ func stackalloc(n uint32) stack {
 // resources and must not split the stack.
 //
 //go:systemstack
-func stackfree(stk stack) {
+func stackfree(stk stack) { // 注: 释放栈
 	gp := getg()
 	v := unsafe.Pointer(stk.lo)
 	n := stk.hi - stk.lo

@@ -1432,7 +1432,7 @@ func usesLibcall() bool {
 
 // mStackIsSystemAllocated indicates whether this runtime starts on a
 // system-allocated stack.
-func mStackIsSystemAllocated() bool {
+func mStackIsSystemAllocated() bool { // 注：linux下为false
 	switch GOOS {
 	case "aix", "darwin", "plan9", "illumos", "ios", "solaris", "windows":
 		return true
@@ -1746,7 +1746,7 @@ func forEachP(fn func(*p)) { // 注：会逐一暂停p来执行函数
 			// case of any races.
 			//
 			// Requires system stack.
-			if notetsleep(&sched.safePointNote, 100*1000) {
+			if notetsleep(&sched.safePointNote, 100*1000) { // 注：等待完成的信号
 				noteclear(&sched.safePointNote)
 				break
 			}
@@ -1851,7 +1851,7 @@ func allocm(pp *p, fn func(), id int64) *m {
 				// reachable off the system stack transitively from
 				// startm.
 				systemstack(func() {
-					stackfree(freem.g0.stack)
+					stackfree(freem.g0.stack) // 注：释放g0的栈
 				})
 			}
 			freem = freem.freelink
@@ -1869,7 +1869,7 @@ func allocm(pp *p, fn func(), id int64) *m {
 	if iscgo || mStackIsSystemAllocated() {
 		mp.g0 = malg(-1)
 	} else {
-		mp.g0 = malg(8192 * sys.StackGuardMultiplier)
+		mp.g0 = malg(8192 * sys.StackGuardMultiplier) // 注：创建一个新的g作为g0
 	}
 	mp.g0.m = mp
 
@@ -2013,7 +2013,7 @@ func oneNewExtraM() {
 	// the goroutine stack ends.
 	mp := allocm(nil, nil, -1)
 	gp := malg(4096)
-	gp.sched.pc = abi.FuncPCABI0(goexit) + sys.PCQuantum
+	gp.sched.pc = abi.FuncPCABI0(goexit) + sys.PCQuantum // 注：pc指向goexit
 	gp.sched.sp = gp.stack.hi
 	gp.sched.sp -= 4 * goarch.PtrSize // extra space in case of reads slightly beyond frame
 	gp.sched.lr = 0
@@ -2027,7 +2027,7 @@ func oneNewExtraM() {
 	// "real" goroutine until needm grabs it.
 	casgstatus(gp, _Gidle, _Gdead)
 	gp.m = mp
-	mp.curg = gp
+	mp.curg = gp // 注：成为当前g
 	mp.isextra = true
 	mp.lockedInt++
 	mp.lockedg.set(gp)
@@ -2046,7 +2046,7 @@ func oneNewExtraM() {
 		traceEvent(traceEvGoInSyscall, -1, gp.goid)
 	}
 	// put on allg for garbage collector
-	allgadd(gp)
+	allgadd(gp) // 注：加入全局g中，方便gc扫描
 
 	// gp is now on the allg list, but we don't want it to be
 	// counted by gcount. It would be more "proper" to increment
@@ -2055,10 +2055,10 @@ func oneNewExtraM() {
 	sched.ngsys.Add(1)
 
 	// Add m to the extra list.
-	mnext := lockextra(true)
+	mnext := lockextra(true) // 注：持有锁
 	mp.schedlink.set(mnext)
 	extraMCount++
-	unlockextra(mp)
+	unlockextra(mp) // 注：释放锁
 }
 
 // dropm is called when a cgo callback has called needm but is now
@@ -2361,9 +2361,9 @@ func stopm() {
 	}
 
 	lock(&sched.lock)
-	mput(gp.m)
+	mput(gp.m) // 注：加入空闲m队列
 	unlock(&sched.lock)
-	mPark()
+	mPark() // 注：阻塞m
 	acquirep(gp.m.nextp.ptr())
 	gp.m.nextp = 0
 }
@@ -2719,7 +2719,7 @@ func execute(gp *g, inheritTime bool) {
 // Tries to steal from other P's, get g from local or global queue, poll network.
 // tryWakeP indicates that the returned goroutine is not normal (GC worker, trace
 // reader) so the caller should try to wake a P.
-func findRunnable() (gp *g, inheritTime, tryWakeP bool) {
+func findRunnable() (gp *g, inheritTime, tryWakeP bool) { // 注：取得一个可用的g
 	mp := getg().m
 
 	// The conditions here and in handoffp must agree: if
@@ -2729,7 +2729,7 @@ func findRunnable() (gp *g, inheritTime, tryWakeP bool) {
 top:
 	pp := mp.p.ptr()
 	if sched.gcwaiting.Load() { // 注：gc STW
-		gcstopm()
+		gcstopm() // 注：gc停止p和m, 等待唤醒
 		goto top
 	}
 	if pp.runSafePointFn != 0 {
@@ -2805,10 +2805,10 @@ top:
 	// blocked thread (e.g. it has already returned from netpoll, but does
 	// not set lastpoll yet), this thread will do blocking netpoll below
 	// anyway.
-	if netpollinited() && netpollWaiters.Load() > 0 && sched.lastpoll.Load() != 0 {
+	if netpollinited() && netpollWaiters.Load() > 0 && sched.lastpoll.Load() != 0 { // 注：从netpoll中取一组g
 		if list := netpoll(0); !list.empty() { // non-blocking
 			gp := list.pop()
-			injectglist(&list)
+			injectglist(&list) // 注：加入本地队列
 			casgstatus(gp, _Gwaiting, _Grunnable)
 			if trace.enabled {
 				traceGoUnpark(gp, 0)
@@ -2822,12 +2822,12 @@ top:
 	// Limit the number of spinning Ms to half the number of busy Ps.
 	// This is necessary to prevent excessive CPU consumption when
 	// GOMAXPROCS>>1 but the program parallelism is low.
-	if mp.spinning || 2*sched.nmspinning.Load() < gomaxprocs-sched.npidle.Load() {
+	if mp.spinning || 2*sched.nmspinning.Load() < gomaxprocs-sched.npidle.Load() { // 注：进入自旋
 		if !mp.spinning {
 			mp.becomeSpinning()
 		}
 
-		gp, inheritTime, tnow, w, newWork := stealWork(now)
+		gp, inheritTime, tnow, w, newWork := stealWork(now) // 注：从其他的p中取得g
 		if gp != nil {
 			// Successfully stole.
 			return gp, inheritTime, false
@@ -2849,7 +2849,7 @@ top:
 	//
 	// If we're in the GC mark phase, can safely scan and blacken objects,
 	// and have work to do, run idle-time marking rather than give up the P.
-	if gcBlackenEnabled != 0 && gcMarkWorkAvailable(pp) && gcController.addIdleMarkWorker() {
+	if gcBlackenEnabled != 0 && gcMarkWorkAvailable(pp) && gcController.addIdleMarkWorker() { // 注：gc期间，依然空闲，则进入空闲模式进行gc标记
 		node := (*gcBgMarkWorkerNode)(gcBgMarkWorkerPool.pop())
 		if node != nil {
 			pp.gcMarkWorkerMode = gcMarkWorkerIdleMode // 注：空闲模式
@@ -2890,17 +2890,18 @@ top:
 	timerpMaskSnapshot := timerpMask
 
 	// return P and block
+	// 注：再次检查是否有可执行的任务，准备阻塞
 	lock(&sched.lock)
-	if sched.gcwaiting.Load() || pp.runSafePointFn != 0 {
+	if sched.gcwaiting.Load() || pp.runSafePointFn != 0 { // 注：如果有可执行的安全点检查
 		unlock(&sched.lock)
 		goto top
 	}
-	if sched.runqsize != 0 {
+	if sched.runqsize != 0 { // 注：全局队列中有g
 		gp := globrunqget(pp, 0)
 		unlock(&sched.lock)
 		return gp, false, false
 	}
-	if !mp.spinning && sched.needspinning.Load() == 1 {
+	if !mp.spinning && sched.needspinning.Load() == 1 { // 注：尚未自旋，可以自旋
 		// See "Delicate dance" comment below.
 		mp.becomeSpinning() // 注：进入自旋状态
 		unlock(&sched.lock)
@@ -2909,7 +2910,7 @@ top:
 	if releasep() != pp {
 		throw("findrunnable: wrong p")
 	}
-	now = pidleput(pp, now)
+	now = pidleput(pp, now) // 注：放入空闲p队列
 	unlock(&sched.lock)
 
 	// Delicate dance: thread transitions from spinning to non-spinning
@@ -2949,8 +2950,8 @@ top:
 	// Also see "Worker thread parking/unparking" comment at the top of the
 	// file.
 	wasSpinning := mp.spinning
-	if mp.spinning {
-		mp.spinning = false
+	if mp.spinning { // 注：m在自旋状态
+		mp.spinning = false // 注：解除m的自旋
 		if sched.nmspinning.Add(-1) < 0 {
 			throw("findrunnable: negative nmspinning")
 		}
@@ -2966,7 +2967,7 @@ top:
 
 		// Check all runqueues once again.
 		pp := checkRunqsNoP(allpSnapshot, idlepMaskSnapshot)
-		if pp != nil {
+		if pp != nil { // 注：如果有其他p有任务，则m进入自旋
 			acquirep(pp)
 			mp.becomeSpinning()
 			goto top
@@ -2974,7 +2975,7 @@ top:
 
 		// Check for idle-priority GC work again.
 		pp, gp := checkIdleGCNoP()
-		if pp != nil {
+		if pp != nil { // 注：如果有空闲gc任务，但是没有p执行，则m进入自旋
 			acquirep(pp)
 			mp.becomeSpinning()
 
@@ -2997,7 +2998,7 @@ top:
 	}
 
 	// Poll network until next timer.
-	if netpollinited() && (netpollWaiters.Load() > 0 || pollUntil != 0) && sched.lastpoll.Swap(0) != 0 {
+	if netpollinited() && (netpollWaiters.Load() > 0 || pollUntil != 0) && sched.lastpoll.Swap(0) != 0 { // 注：有未执行的网络任务
 		sched.pollUntil.Store(pollUntil)
 		if mp.p != 0 {
 			throw("findrunnable: netpoll with p")
@@ -3054,7 +3055,7 @@ top:
 			netpollBreak()
 		}
 	}
-	stopm()
+	stopm() // 注：m休眠
 	goto top
 }
 
@@ -3085,21 +3086,21 @@ func pollWork() bool {
 //
 // If now is not 0 it is the current time. stealWork returns the passed time or
 // the current time if now was passed as 0.
-func stealWork(now int64) (gp *g, inheritTime bool, rnow, pollUntil int64, newWork bool) {
+func stealWork(now int64) (gp *g, inheritTime bool, rnow, pollUntil int64, newWork bool) { // 注：抢其他p的任务
 	pp := getg().m.p.ptr()
 
 	ranTimer := false
 
 	const stealTries = 4
-	for i := 0; i < stealTries; i++ {
-		stealTimersOrRunNextG := i == stealTries-1
+	for i := 0; i < stealTries; i++ { // 注：尝试4次
+		stealTimersOrRunNextG := i == stealTries-1 // 注：检查是否等于3，最后一次
 
-		for enum := stealOrder.start(fastrand()); !enum.done(); enum.next() {
-			if sched.gcwaiting.Load() {
+		for enum := stealOrder.start(fastrand()); !enum.done(); enum.next() { // 注：从一个随机的p开始找
+			if sched.gcwaiting.Load() { // 注：gc期间休息，持续自旋
 				// GC work may be available.
 				return nil, false, now, pollUntil, true
 			}
-			p2 := allp[enum.position()]
+			p2 := allp[enum.position()] // 注：取得一个p
 			if pp == p2 {
 				continue
 			}
@@ -3117,13 +3118,13 @@ func stealWork(now int64) (gp *g, inheritTime bool, rnow, pollUntil int64, newWo
 			//
 			// timerpMask tells us whether the P may have timers at all. If it
 			// can't, no need to check at all.
-			if stealTimersOrRunNextG && timerpMask.read(enum.position()) {
-				tnow, w, ran := checkTimers(p2, now)
+			if stealTimersOrRunNextG && timerpMask.read(enum.position()) { // 如果是第四次执行，并且p上可能有timer
+				tnow, w, ran := checkTimers(p2, now) // 注：检查并执行其他p的timer
 				now = tnow
 				if w != 0 && (pollUntil == 0 || w < pollUntil) {
 					pollUntil = w
 				}
-				if ran {
+				if ran { // 注：可能有新的g加入队列，因此尝试获取一下
 					// Running the timers may have
 					// made an arbitrary number of G's
 					// ready and added them to this P's
@@ -3140,7 +3141,7 @@ func stealWork(now int64) (gp *g, inheritTime bool, rnow, pollUntil int64, newWo
 			}
 
 			// Don't bother to attempt to steal if p2 is idle.
-			if !idlepMask.read(enum.position()) {
+			if !idlepMask.read(enum.position()) { // 注：如果不是空闲p，则尝试抢一下g
 				if gp := runqsteal(pp, p2, stealTimersOrRunNextG); gp != nil {
 					return gp, false, now, pollUntil, ranTimer
 				}
@@ -3472,16 +3473,16 @@ func dropg() {
 // We pass now in and out to avoid extra calls of nanotime.
 //
 //go:yeswritebarrierrec
-func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
+func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) { // 注：检查timer
 	// If it's not yet time for the first timer, or the first adjusted
 	// timer, then there is nothing to do.
-	next := pp.timer0When.Load()
+	next := pp.timer0When.Load() // 注：取得当前p的最早的timer
 	nextAdj := pp.timerModifiedEarliest.Load()
-	if next == 0 || (nextAdj != 0 && nextAdj < next) {
+	if next == 0 || (nextAdj != 0 && nextAdj < next) { // 注：timer被修改
 		next = nextAdj
 	}
 
-	if next == 0 {
+	if next == 0 { // 注：no timer
 		// No timers to run or adjust.
 		return now, 0, false
 	}
@@ -3489,12 +3490,12 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 	if now == 0 {
 		now = nanotime()
 	}
-	if now < next {
+	if now < next { // 注：如果没有到触发时间
 		// Next timer is not ready to run, but keep going
 		// if we would clear deleted timers.
 		// This corresponds to the condition below where
 		// we decide whether to call clearDeletedTimers.
-		if pp != getg().m.p.ptr() || int(pp.deletedTimers.Load()) <= int(pp.numTimers.Load()/4) {
+		if pp != getg().m.p.ptr() || int(pp.deletedTimers.Load()) <= int(pp.numTimers.Load()/4) { // 注：也不需要清理timer
 			return now, next, false
 		}
 	}
@@ -3502,11 +3503,11 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 	lock(&pp.timersLock)
 
 	if len(pp.timers) > 0 {
-		adjusttimers(pp, now)
+		adjusttimers(pp, now) // 注：干预timer
 		for len(pp.timers) > 0 {
 			// Note that runtimer may temporarily unlock
 			// pp.timersLock.
-			if tw := runtimer(pp, now); tw != 0 {
+			if tw := runtimer(pp, now); tw != 0 { // 注：逐一执行timer，直到tw=0
 				if tw > 0 {
 					pollUntil = tw
 				}
@@ -3519,8 +3520,8 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 	// If this is the local P, and there are a lot of deleted timers,
 	// clear them out. We only do this for the local P to reduce
 	// lock contention on timersLock.
-	if pp == getg().m.p.ptr() && int(pp.deletedTimers.Load()) > len(pp.timers)/4 {
-		clearDeletedTimers(pp)
+	if pp == getg().m.p.ptr() && int(pp.deletedTimers.Load()) > len(pp.timers)/4 { // 注：清理timer
+		clearDeletedTimers(pp) // 注：清理timer
 	}
 
 	unlock(&pp.timersLock)
@@ -4269,7 +4270,7 @@ func syscall_runtime_AfterExec() {
 }
 
 // Allocate a new g, with a stack big enough for stacksize bytes.
-func malg(stacksize int32) *g {
+func malg(stacksize int32) *g { // 注：创建一个新的g
 	newg := new(g)
 	if stacksize >= 0 {
 		stacksize = round2(_StackSystem + stacksize)
@@ -4893,7 +4894,7 @@ func (pp *p) init(id int32) {
 
 	// This P may get timers when it starts running. Set the mask here
 	// since the P may not go through pidleget (notably P 0 on startup).
-	timerpMask.set(id)
+	timerpMask.set(id) // 注：写入timer掩码
 	// Similarly, we may not go through pidleget before this P starts
 	// running if it is P 0 on startup.
 	idlepMask.clear(id)
@@ -5121,8 +5122,8 @@ func procresize(nprocs int32) *p {
 			runnablePs = pp
 		}
 	}
-	stealOrder.reset(uint32(nprocs))
-	var int32p *int32 = &gomaxprocs // make compiler check that gomaxprocs is an int32
+	stealOrder.reset(uint32(nprocs)) // 注：随机p的大小，用于p的调度，抢夺其他p的g资源
+	var int32p *int32 = &gomaxprocs  // make compiler check that gomaxprocs is an int32
 	atomic.Store((*uint32)(unsafe.Pointer(int32p)), uint32(nprocs))
 	if old != nprocs {
 		// Notify the limiter that the amount of procs has changed.
@@ -5894,7 +5895,7 @@ func updateTimerPMask(pp *p) {
 	// decrement numTimers when handling a timerModified timer in
 	// checkTimers. We must take timersLock to serialize with these changes.
 	lock(&pp.timersLock)
-	if pp.numTimers.Load() == 0 {
+	if pp.numTimers.Load() == 0 { // 注：没有timer则清理掩码
 		timerpMask.clear(pp.id)
 	}
 	unlock(&pp.timersLock)
@@ -5947,7 +5948,7 @@ func pidleget(now int64) (*p, int64) {
 		if now == 0 {
 			now = nanotime()
 		}
-		timerpMask.set(pp.id)
+		timerpMask.set(pp.id) // 注：恢复p，写入timer掩码
 		idlepMask.clear(pp.id)
 		sched.pidle = pp.link
 		sched.npidle.Add(-1)
@@ -6203,10 +6204,10 @@ func runqgrab(pp *p, batch *[256]guintptr, batchHead uint32, stealRunNextG bool)
 		t := atomic.LoadAcq(&pp.runqtail) // load-acquire, synchronize with the producer
 		n := t - h
 		n = n - n/2
-		if n == 0 {
-			if stealRunNextG {
+		if n == 0 { // 注：本地队列是空的
+			if stealRunNextG { // 注：第四次抢夺
 				// Try to steal from pp.runnext.
-				if next := pp.runnext; next != 0 {
+				if next := pp.runnext; next != 0 { // 注：抢走runnext
 					if pp.status == _Prunning {
 						// Sleep to ensure that pp isn't about to run the g
 						// we are about to steal.
@@ -6239,11 +6240,11 @@ func runqgrab(pp *p, batch *[256]guintptr, batchHead uint32, stealRunNextG bool)
 		if n > uint32(len(pp.runq)/2) { // read inconsistent h and t
 			continue
 		}
-		for i := uint32(0); i < n; i++ {
+		for i := uint32(0); i < n; i++ { // 注：从队列头部抢走一半的g
 			g := pp.runq[(h+i)%uint32(len(pp.runq))]
 			batch[(batchHead+i)%uint32(len(batch))] = g
 		}
-		if atomic.CasRel(&pp.runqhead, h, h+n) { // cas-release, commits consume
+		if atomic.CasRel(&pp.runqhead, h, h+n) { // 注：修改成功，则成功抢走 // cas-release, commits consume
 			return n
 		}
 	}
@@ -6253,13 +6254,13 @@ func runqgrab(pp *p, batch *[256]guintptr, batchHead uint32, stealRunNextG bool)
 // and put onto local runnable queue of p.
 // Returns one of the stolen elements (or nil if failed).
 func runqsteal(pp, p2 *p, stealRunNextG bool) *g {
-	t := pp.runqtail
+	t := pp.runqtail // 注：此时runqtail=runqhead
 	n := runqgrab(p2, &pp.runq, t, stealRunNextG)
 	if n == 0 {
 		return nil
 	}
 	n--
-	gp := pp.runq[(t+n)%uint32(len(pp.runq))].ptr()
+	gp := pp.runq[(t+n)%uint32(len(pp.runq))].ptr() // 注：取出最后一个g
 	if n == 0 {
 		return gp
 	}
@@ -6267,7 +6268,7 @@ func runqsteal(pp, p2 *p, stealRunNextG bool) *g {
 	if t-h+n >= uint32(len(pp.runq)) {
 		throw("runqsteal: runq overflow")
 	}
-	atomic.StoreRel(&pp.runqtail, t+n) // store-release, makes the item available for consumption
+	atomic.StoreRel(&pp.runqtail, t+n) // 注：修改队尾成功，完成抢夺 // store-release, makes the item available for consumption
 	return gp
 }
 

@@ -66,7 +66,7 @@ func (rw *RWMutex) RLock() {
 		_ = rw.w.state
 		race.Disable()
 	}
-	if rw.readerCount.Add(1) < 0 {
+	if rw.readerCount.Add(1) < 0 { // 注：如果<0,说明有写锁持有，进入读等待队列
 		// A writer is pending, wait for it.
 		runtime_SemacquireRWMutexR(&rw.readerSem, false, 0)
 	}
@@ -114,7 +114,7 @@ func (rw *RWMutex) RUnlock() {
 		race.ReleaseMerge(unsafe.Pointer(&rw.writerSem))
 		race.Disable()
 	}
-	if r := rw.readerCount.Add(-1); r < 0 {
+	if r := rw.readerCount.Add(-1); r < 0 { // 注：readerCount是负数，说明有写锁等待
 		// Outlined slow-path to allow the fast-path to be inlined
 		rw.rUnlockSlow(r)
 	}
@@ -129,7 +129,7 @@ func (rw *RWMutex) rUnlockSlow(r int32) {
 		fatal("sync: RUnlock of unlocked RWMutex")
 	}
 	// A writer is pending.
-	if rw.readerWait.Add(-1) == 0 {
+	if rw.readerWait.Add(-1) == 0 { // 注：全部读锁释放，则调度一个写锁
 		// The last reader unblocks the writer.
 		runtime_Semrelease(&rw.writerSem, false, 1)
 	}
@@ -144,11 +144,18 @@ func (rw *RWMutex) Lock() {
 		race.Disable()
 	}
 	// First, resolve competition with other writers.
-	rw.w.Lock()
+	rw.w.Lock() // 注：加写锁互斥
 	// Announce to readers there is a pending writer.
-	r := rw.readerCount.Add(-rwmutexMaxReaders) + rwmutexMaxReaders
+	r := rw.readerCount.Add(-rwmutexMaxReaders) + rwmutexMaxReaders // 注：抢锁
+	// 注：结果可能性：
+	// 注：=0 则说明抢到锁
+	// 注：<0 说明有其他协程在抢写锁
+	// 注：>0 说明有其他协程再抢读锁
 	// Wait for active readers.
-	if r != 0 && rw.readerWait.Add(r) != 0 {
+	if r != 0 && rw.readerWait.Add(r) != 0 { // 注：再抢一次，没抢到则阻塞
+		// 注：举例方便理解
+		// 注：1.如果有一个协程取得读锁，则r=1-rwmutexMaxReaders+rwmutexMaxReaders=1, rw.readerWait+=1
+		// 注：2.如果有一个协程取得写锁，则r=-rwmutexMaxReaders-rwmutexMaxReaders+rwmutexMaxReaders, rw.readerWait-=rwmutexMaxReaders
 		runtime_SemacquireRWMutex(&rw.writerSem, false, 0)
 	}
 	if race.Enabled {
@@ -203,13 +210,13 @@ func (rw *RWMutex) Unlock() {
 	}
 
 	// Announce to readers there is no active writer.
-	r := rw.readerCount.Add(rwmutexMaxReaders)
+	r := rw.readerCount.Add(rwmutexMaxReaders) // 注：释放写锁
 	if r >= rwmutexMaxReaders {
 		race.Enable()
 		fatal("sync: Unlock of unlocked RWMutex")
 	}
 	// Unblock blocked readers, if any.
-	for i := 0; i < int(r); i++ {
+	for i := 0; i < int(r); i++ { // 注：唤醒读锁
 		runtime_Semrelease(&rw.readerSem, false, 0)
 	}
 	// Allow other writers to proceed.

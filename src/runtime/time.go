@@ -181,18 +181,18 @@ func timeSleep(ns int64) {
 	}
 
 	gp := getg()
-	t := gp.timer
+	t := gp.timer // 注：取得一个timer，由于sleep会阻塞g，因此一个g最多同时拥有一个timer
 	if t == nil {
 		t = new(timer)
 		gp.timer = t
 	}
-	t.f = goroutineReady
+	t.f = goroutineReady // 注：返回调用goready恢复
 	t.arg = gp
-	t.nextwhen = nanotime() + ns
-	if t.nextwhen < 0 { // check for overflow.
+	t.nextwhen = nanotime() + ns // 注：调整nextwhen
+	if t.nextwhen < 0 {          // check for overflow.
 		t.nextwhen = maxWhen
 	}
-	gopark(resetForSleep, unsafe.Pointer(t), waitReasonSleep, traceEvGoSleep, 1)
+	gopark(resetForSleep, unsafe.Pointer(t), waitReasonSleep, traceEvGoSleep, 1) // 注：阻塞
 }
 
 // resetForSleep is called after the goroutine is parked for timeSleep.
@@ -275,7 +275,7 @@ func addtimer(t *timer) {
 	mp := acquirem()
 
 	pp := getg().m.p.ptr()
-	lock(&pp.timersLock)
+	lock(&pp.timersLock) // 注：+lock
 	cleantimers(pp)
 	doaddtimer(pp, t)
 	unlock(&pp.timersLock)
@@ -299,10 +299,10 @@ func doaddtimer(pp *p, t *timer) {
 	}
 	t.pp.set(pp)
 	i := len(pp.timers)
-	pp.timers = append(pp.timers, t)
-	siftupTimer(pp.timers, i)
-	if t == pp.timers[0] {
-		pp.timer0When.Store(t.when)
+	pp.timers = append(pp.timers, t) // 注：加入timers尾部
+	siftupTimer(pp.timers, i)        // 注：进行堆排序，进行元素上浮
+	if t == pp.timers[0] {           // 注：如果新timer成为堆顶，则调整timer0when的值
+		pp.timer0When.Store(t.when) // 注：写入第一个完成的timers
 	}
 	pp.numTimers.Add(1)
 }
@@ -389,13 +389,13 @@ func dodeltimer(pp *p, i int) int {
 	pp.timers[last] = nil
 	pp.timers = pp.timers[:last]
 	smallestChanged := i
-	if i != last {
+	if i != last { // 注：不是底部元素，则先上浮再下沉
 		// Moving to i may have moved the last timer to a new parent,
 		// so sift up to preserve the heap guarantee.
 		smallestChanged = siftupTimer(pp.timers, i)
 		siftdownTimer(pp.timers, i)
 	}
-	if i == 0 {
+	if i == 0 { // 注：如果堆顶元素被修改，则重新计算timer0When
 		updateTimer0When(pp)
 	}
 	n := pp.numTimers.Add(-1)
@@ -410,7 +410,7 @@ func dodeltimer(pp *p, i int) int {
 // We are locked on the P when this is called.
 // It reports whether it saw no problems due to races.
 // The caller must have locked the timers for pp.
-func dodeltimer0(pp *p) {
+func dodeltimer0(pp *p) { // 注：移除堆顶元素
 	if t := pp.timers[0]; t.pp.ptr() != pp {
 		throw("dodeltimer0: wrong P")
 	} else {
@@ -423,7 +423,7 @@ func dodeltimer0(pp *p) {
 	pp.timers[last] = nil
 	pp.timers = pp.timers[:last]
 	if last > 0 {
-		siftdownTimer(pp.timers, 0)
+		siftdownTimer(pp.timers, 0) // 注：移除顶部元素，执行堆排序，进行元素下沉
 	}
 	updateTimer0When(pp)
 	n := pp.numTimers.Add(-1)
@@ -436,7 +436,7 @@ func dodeltimer0(pp *p) {
 // modtimer modifies an existing timer.
 // This is called by the netpoll code or time.Ticker.Reset or time.Timer.Reset.
 // Reports whether the timer was modified before it was run.
-func modtimer(t *timer, when, period int64, f func(any, uintptr), arg any, seq uintptr) bool {
+func modtimer(t *timer, when, period int64, f func(any, uintptr), arg any, seq uintptr) bool { // 注：调整timer的时间
 	if when <= 0 {
 		throw("timer when must be positive")
 	}
@@ -445,8 +445,8 @@ func modtimer(t *timer, when, period int64, f func(any, uintptr), arg any, seq u
 	}
 
 	status := uint32(timerNoStatus)
-	wasRemoved := false
-	var pending bool
+	wasRemoved := false // 注：是否已被移除
+	var pending bool    // 注：是否未被执行
 	var mp *m
 loop:
 	for {
@@ -501,7 +501,7 @@ loop:
 	t.arg = arg
 	t.seq = seq
 
-	if wasRemoved {
+	if wasRemoved { // 注：如果已被移除，则重新加入timer列表
 		t.when = when
 		pp := getg().m.p.ptr()
 		lock(&pp.timersLock)
@@ -518,7 +518,7 @@ loop:
 		// be out of order. So we put the new when value in the
 		// nextwhen field, and let the other P set the when field
 		// when it is prepared to resort the heap.
-		t.nextwhen = when
+		t.nextwhen = when // 注：调整为nextwhen，并修改状态为Modified
 
 		newStatus := uint32(timerModifiedLater)
 		if when < t.when {
@@ -528,7 +528,7 @@ loop:
 		tpp := t.pp.ptr()
 
 		if newStatus == timerModifiedEarlier {
-			updateTimerModifiedEarliest(tpp, when)
+			updateTimerModifiedEarliest(tpp, when) // 注：调整p的timerModifiedEarliest
 		}
 
 		// Set the new status of the timer.
@@ -578,7 +578,7 @@ func cleantimers(pp *p) {
 		if t.pp.ptr() != pp {
 			throw("cleantimers: bad p")
 		}
-		switch s := t.status.Load(); s {
+		switch s := t.status.Load(); s { // 注：检查堆顶元素是否需要处理
 		case timerDeleted:
 			if !t.status.CompareAndSwap(s, timerRemoving) {
 				continue
@@ -691,7 +691,7 @@ func adjusttimers(pp *p, now int64) {
 		}
 		switch s := t.status.Load(); s {
 		case timerDeleted:
-			if t.status.CompareAndSwap(s, timerRemoving) {
+			if t.status.CompareAndSwap(s, timerRemoving) { // 注：删除一个timer
 				changed := dodeltimer(pp, i)
 				if !t.status.CompareAndSwap(timerRemoving, timerRemoved) {
 					badTimer()
@@ -709,8 +709,8 @@ func adjusttimers(pp *p, now int64) {
 				// We don't add it back yet because the
 				// heap manipulation could cause our
 				// loop to skip some other timer.
-				changed := dodeltimer(pp, i)
-				moved = append(moved, t)
+				changed := dodeltimer(pp, i) // 注：移除当前元素
+				moved = append(moved, t)     // 注：加入新队列
 				// Go back to the earliest changed heap entry.
 				// "- 1" because the loop will add 1.
 				i = changed - 1
@@ -729,7 +729,7 @@ func adjusttimers(pp *p, now int64) {
 	}
 
 	if len(moved) > 0 {
-		addAdjustedTimers(pp, moved)
+		addAdjustedTimers(pp, moved) // 注：将迁移队列逐一加入timers队列
 	}
 
 	if verifyTimers {
@@ -779,25 +779,25 @@ func runtimer(pp *p, now int64) int64 {
 		}
 		switch s := t.status.Load(); s {
 		case timerWaiting:
-			if t.when > now {
+			if t.when > now { // 注：没到执行时间
 				// Not ready to run.
 				return t.when
 			}
 
-			if !t.status.CompareAndSwap(s, timerRunning) {
+			if !t.status.CompareAndSwap(s, timerRunning) { // 注：没有抢到锁
 				continue
 			}
 			// Note that runOneTimer may temporarily unlock
 			// pp.timersLock.
-			runOneTimer(pp, t, now)
+			runOneTimer(pp, t, now) // 注：执行一个timer
 			return 0
 
 		case timerDeleted:
-			if !t.status.CompareAndSwap(s, timerRemoving) {
+			if !t.status.CompareAndSwap(s, timerRemoving) { // 注：抢锁
 				continue
 			}
-			dodeltimer0(pp)
-			if !t.status.CompareAndSwap(timerRemoving, timerRemoved) {
+			dodeltimer0(pp)                                            // 注：移除顶部元素
+			if !t.status.CompareAndSwap(timerRemoving, timerRemoved) { // 注：置为已删除
 				badTimer()
 			}
 			pp.deletedTimers.Add(-1)
@@ -810,8 +810,8 @@ func runtimer(pp *p, now int64) int64 {
 				continue
 			}
 			t.when = t.nextwhen
-			dodeltimer0(pp)
-			doaddtimer(pp, t)
+			dodeltimer0(pp)   // 注：顶部元素就是t，因此就是移除t
+			doaddtimer(pp, t) // 注：重新加入队尾
 			if !t.status.CompareAndSwap(timerMoving, timerWaiting) {
 				badTimer()
 			}
@@ -854,18 +854,18 @@ func runOneTimer(pp *p, t *timer, now int64) {
 	if t.period > 0 {
 		// Leave in heap but adjust next time to fire.
 		delta := t.when - now
-		t.when += t.period * (1 + -delta/t.period)
-		if t.when < 0 { // check for overflow.
+		t.when += t.period * (1 + -delta/t.period) // 注：需要调整when，然后重排序
+		if t.when < 0 {                            // check for overflow.
 			t.when = maxWhen
 		}
 		siftdownTimer(pp.timers, 0)
-		if !t.status.CompareAndSwap(timerRunning, timerWaiting) {
+		if !t.status.CompareAndSwap(timerRunning, timerWaiting) { // 注：回到等待状态
 			badTimer()
 		}
 		updateTimer0When(pp)
 	} else {
 		// Remove from heap.
-		dodeltimer0(pp)
+		dodeltimer0(pp) // 注：移除顶部元素
 		if !t.status.CompareAndSwap(timerRunning, timerNoStatus) {
 			badTimer()
 		}
@@ -882,7 +882,7 @@ func runOneTimer(pp *p, t *timer, now int64) {
 
 	unlock(&pp.timersLock)
 
-	f(arg, seq)
+	f(arg, seq) // 注：执行timer的函数
 
 	lock(&pp.timersLock)
 
@@ -907,8 +907,8 @@ func clearDeletedTimers(pp *p) {
 	pp.timerModifiedEarliest.Store(0)
 
 	cdel := int32(0)
-	to := 0
-	changedHeap := false
+	to := 0              // 注：赋值慢指针
+	changedHeap := false // 注：堆是否发生改变
 	timers := pp.timers
 nextTimer:
 	for _, t := range timers {
@@ -917,7 +917,7 @@ nextTimer:
 			case timerWaiting:
 				if changedHeap {
 					timers[to] = t
-					siftupTimer(timers, to)
+					siftupTimer(timers, to) // 注：元素上浮，实际上在重建堆
 				}
 				to++
 				continue nextTimer
@@ -925,9 +925,9 @@ nextTimer:
 				if t.status.CompareAndSwap(s, timerMoving) {
 					t.when = t.nextwhen
 					timers[to] = t
-					siftupTimer(timers, to)
+					siftupTimer(timers, to) // 注：when修改为nextwhen，进行上浮
 					to++
-					changedHeap = true
+					changedHeap = true // 注：从此元素开始，每个元素都必须上浮
 					if !t.status.CompareAndSwap(timerMoving, timerWaiting) {
 						badTimer()
 					}
@@ -935,12 +935,12 @@ nextTimer:
 				}
 			case timerDeleted:
 				if t.status.CompareAndSwap(s, timerRemoving) {
-					t.pp = 0
-					cdel++
-					if !t.status.CompareAndSwap(timerRemoving, timerRemoved) {
+					t.pp = 0                                                   // 注：解除和p的关系
+					cdel++                                                     // 注：此处to不++，因此后续元素会覆盖它
+					if !t.status.CompareAndSwap(timerRemoving, timerRemoved) { // 注：置为删除
 						badTimer()
 					}
-					changedHeap = true
+					changedHeap = true // 注：从此元素开始，每个元素都必须上浮
 					continue nextTimer
 				}
 			case timerModifying:
@@ -962,7 +962,7 @@ nextTimer:
 	// Set remaining slots in timers slice to nil,
 	// so that the timer values can be garbage collected.
 	for i := to; i < len(timers); i++ {
-		timers[i] = nil
+		timers[i] = nil // 注：to以后元素归0
 	}
 
 	pp.deletedTimers.Add(-cdel)
@@ -1006,7 +1006,7 @@ func updateTimer0When(pp *p) {
 	if len(pp.timers) == 0 {
 		pp.timer0When.Store(0)
 	} else {
-		pp.timer0When.Store(pp.timers[0].when)
+		pp.timer0When.Store(pp.timers[0].when) // 注：保存最早时间点
 	}
 }
 
@@ -1067,7 +1067,7 @@ func timeSleepUntil() int64 {
 // siftupTimer puts the timer at position i in the right place
 // in the heap by moving it up toward the top of the heap.
 // It returns the smallest changed index.
-func siftupTimer(t []*timer, i int) int {
+func siftupTimer(t []*timer, i int) int { // 注：4叉极小堆，元素上浮
 	if i >= len(t) {
 		badTimer()
 	}
@@ -1092,7 +1092,7 @@ func siftupTimer(t []*timer, i int) int {
 
 // siftdownTimer puts the timer at position i in the right place
 // in the heap by moving it down toward the bottom of the heap.
-func siftdownTimer(t []*timer, i int) {
+func siftdownTimer(t []*timer, i int) { // 注：元素下沉
 	n := len(t)
 	if i >= n {
 		badTimer()
@@ -1109,25 +1109,25 @@ func siftdownTimer(t []*timer, i int) {
 			break
 		}
 		w := t[c].when
-		if c+1 < n && t[c+1].when < w {
+		if c+1 < n && t[c+1].when < w { // 注：c1与c2比较
 			w = t[c+1].when
 			c++
 		}
 		if c3 < n {
 			w3 := t[c3].when
-			if c3+1 < n && t[c3+1].when < w3 {
+			if c3+1 < n && t[c3+1].when < w3 { // 注：c3与c4比较
 				w3 = t[c3+1].when
 				c3++
 			}
-			if w3 < w {
+			if w3 < w { // 注：两者结果再比较
 				w = w3
 				c = c3
 			}
 		}
-		if w >= when {
+		if w >= when { // 注：与根进行比较
 			break
 		}
-		t[i] = t[c]
+		t[i] = t[c] // 注：交换元素，进行再次比较
 		i = c
 	}
 	if tmp != t[i] {

@@ -177,6 +177,7 @@ func newosproc(mp *m) {
 	var oset sigset
 	sigprocmask(_SIG_SETMASK, &sigset_all, &oset)
 	ret := retryOnEAGAIN(func() int32 {
+		// 注：创建子线程，子线程执行mstart，父线程直接返回
 		r := clone(cloneFlags, stk, unsafe.Pointer(mp), unsafe.Pointer(mp.g0), unsafe.Pointer(abi.FuncPCABI0(mstart)))
 		// clone returns positive TID, negative errno.
 		// We don't care about the TID.

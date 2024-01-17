@@ -564,8 +564,8 @@ TEXT runtime·clone(SB),NOSPLIT,$0
 	MOVQ    $0, R8
 	// Copy mp, gp, fn off parent stack for use by child.
 	// Careful: Linux system call clobbers CX and R11.
-	MOVQ	mp+16(FP), R13
-	MOVQ	gp+24(FP), R9
+	MOVQ	mp+16(FP), R13 // 注：r13=mp
+	MOVQ	gp+24(FP), R9 // 注：r9=g0
 	MOVQ	fn+32(FP), R12
 	CMPQ	R13, $0    // m
 	JEQ	nog1
@@ -601,12 +601,12 @@ nog1:
 	// Initialize m->procid to Linux tid
 	MOVL	$SYS_gettid, AX
 	SYSCALL
-	MOVQ	AX, m_procid(R13)
+	MOVQ	AX, m_procid(R13) // 注：mp.procid=线程id
 
 	// In child, set up new stack
 	get_tls(CX)
-	MOVQ	R13, g_m(R9)
-	MOVQ	R9, g(CX)
+	MOVQ	R13, g_m(R9) // 注：g0.m=mp
+	MOVQ	R9, g(CX) // 注：g0写入tls
 	MOVQ	R9, R14 // set g register
 	CALL	runtime·stackcheck(SB)
 

@@ -437,16 +437,16 @@ TEXT runtime·mcall<ABIInternal>(SB), NOSPLIT, $0-8
 	MOVQ	BP, (g_sched+gobuf_bp)(R14) // 注：gobuf_bp=BP
 
 	// switch to m->g0 & its stack, call fn
-	MOVQ	g_m(R14), BX
+	MOVQ	g_m(R14), BX // 注：由于r14=*g, 因此BX=*g.m，当前m
 	MOVQ	m_g0(BX), SI	// SI = g.m.g0
 	CMPQ	SI, R14	// if g == m->g0 call badmcall
 	JNE	goodm
 	JMP	runtime·badmcall(SB)
 goodm:
 	MOVQ	R14, AX		// AX (and arg 0) = g
-	MOVQ	SI, R14		// g = g.m.g0
+	MOVQ	SI, R14		// g = g.m.g0 // 注：R14=g0
 	get_tls(CX)		// Set G in TLS
-	MOVQ	R14, g(CX)
+	MOVQ	R14, g(CX) // 注：g0放入tls
 	MOVQ	(g_sched+gobuf_sp)(R14), SP	// sp = g0.sched.sp
 	PUSHQ	AX	// open up space for fn's arg spill slot
 	MOVQ	0(DX), R12
@@ -466,9 +466,9 @@ TEXT runtime·systemstack_switch(SB), NOSPLIT, $0-0
 // func systemstack(fn func())
 TEXT runtime·systemstack(SB), NOSPLIT, $0-8
 	MOVQ	fn+0(FP), DI	// DI = fn
-	get_tls(CX)
-	MOVQ	g(CX), AX	// AX = g
-	MOVQ	g_m(AX), BX	// BX = m
+	0(CX)
+	MOVQ	g(CX), AX	// AX = g // 注：取得当前g
+	MOVQ	g_m(AX), BX	// BX = m // 注：取得当前m
 
 	CMPQ	AX, m_gsignal(BX)
 	JEQ	noswitch
@@ -477,17 +477,17 @@ TEXT runtime·systemstack(SB), NOSPLIT, $0-8
 	CMPQ	AX, DX
 	JEQ	noswitch
 
-	CMPQ	AX, m_curg(BX)
+	CMPQ	AX, m_curg(BX) // 注：由于上面比较了g=g0，因此此处g就只能是当前业务g
 	JNE	bad
 
 	// switch stacks
 	// save our state in g->sched. Pretend to
 	// be systemstack_switch if the G stack is scanned.
-	CALL	gosave_systemstack_switch<>(SB)
+	CALL	gosave_systemstack_switch<>(SB) // 注：保存g的状态
 
 	// switch to g0
-	MOVQ	DX, g(CX)
-	MOVQ	DX, R14 // set the g register
+	MOVQ	DX, g(CX) // 注：g0写入tls
+	MOVQ	DX, R14 // 注：g0成为R14 // set the g register
 	MOVQ	(g_sched+gobuf_sp)(DX), BX
 	MOVQ	BX, SP
 
@@ -501,7 +501,7 @@ TEXT runtime·systemstack(SB), NOSPLIT, $0-8
 	MOVQ	g(CX), AX
 	MOVQ	g_m(AX), BX
 	MOVQ	m_curg(BX), AX
-	MOVQ	AX, g(CX)
+	MOVQ	AX, g(CX) // 注：将业务g写入tls, 没有恢复R14?
 	MOVQ	(g_sched+gobuf_sp)(AX), SP
 	MOVQ	$0, (g_sched+gobuf_sp)(AX)
 	RET
@@ -511,7 +511,7 @@ noswitch:
 	// Using a tail call here cleans up tracebacks since we won't stop
 	// at an intermediate systemstack.
 	MOVQ	DI, DX
-	MOVQ	0(DI), DI
+	MOVQ	0(DI), DI // 注：取DI的值
 	JMP	DI
 
 bad:
