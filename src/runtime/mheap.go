@@ -1243,10 +1243,10 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	pp := gp.m.p.ptr()
 	if !needPhysPageAlign && pp != nil && npages < pageCachePages/4 { // 注：npages < 16
 		// 注：较小的span
-		c := &pp.pcache
+		c := &pp.pcache // 注：使用p分配
 
 		// If the cache is empty, refill it.
-		if c.empty() {
+		if c.empty() { // 注：p的cache是空的，则初始化
 			lock(&h.lock)
 			*c = h.pages.allocToCache()
 			unlock(&h.lock)
@@ -1268,7 +1268,7 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	// whole job done without the heap lock.
 	lock(&h.lock)
 
-	if needPhysPageAlign {
+	if needPhysPageAlign { // 注：openbsd专属
 		// Overallocate by a physical page to allow for later alignment.
 		extraPages := physPageSize / pageSize
 
@@ -1299,10 +1299,10 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 
 	if base == 0 {
 		// Try to acquire a base address.
-		base, scav = h.pages.alloc(npages)
+		base, scav = h.pages.alloc(npages) // 注：使用全局分配
 		if base == 0 {
 			var ok bool
-			growth, ok = h.grow(npages)
+			growth, ok = h.grow(npages) // 注：扩容
 			if !ok {
 				unlock(&h.lock)
 				return nil
@@ -1316,7 +1316,7 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	if s == nil {
 		// We failed to get an mspan earlier, so grab
 		// one now that we have the heap lock.
-		s = h.allocMSpanLocked()
+		s = h.allocMSpanLocked() // 注：申请一个新的mspan
 	}
 	unlock(&h.lock)
 

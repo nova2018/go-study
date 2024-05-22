@@ -38,14 +38,14 @@ func (c *pageCache) alloc(npages uintptr) (uintptr, uintptr) {
 	if c.cache == 0 {
 		return 0, 0
 	}
-	if npages == 1 {
-		i := uintptr(sys.TrailingZeros64(c.cache))
+	if npages == 1 { // 注：仅有一页
+		i := uintptr(sys.TrailingZeros64(c.cache)) // 注：返回尾数0的个数
 		scav := (c.scav >> i) & 1
-		c.cache &^= 1 << i // set bit to mark in-use
+		c.cache &^= 1 << i // set bit to mark in-use // 注：标记为已使用
 		c.scav &^= 1 << i  // clear bit to mark unscavenged
 		return c.base + i*pageSize, uintptr(scav) * pageSize
 	}
-	return c.allocN(npages)
+	return c.allocN(npages) // 注：分配多页
 }
 
 // allocN is a helper which attempts to allocate npages worth of pages
@@ -55,7 +55,7 @@ func (c *pageCache) alloc(npages uintptr) (uintptr, uintptr) {
 // Returns a base address and the amount of scavenged memory in the
 // allocated region in bytes.
 func (c *pageCache) allocN(npages uintptr) (uintptr, uintptr) {
-	i := findBitRange64(c.cache, uint(npages))
+	i := findBitRange64(c.cache, uint(npages)) // 注：计算有连续页空间(页数>1)
 	if i >= 64 {
 		return 0, 0
 	}
@@ -119,11 +119,11 @@ func (p *pageAlloc) allocToCache() pageCache {
 	// any known chunk, then we know we're out of memory.
 	if chunkIndex(p.searchAddr.addr()) >= p.end {
 		return pageCache{}
-	}
+	} // 注：如果分配光了，则结束
 	c := pageCache{}
 	ci := chunkIndex(p.searchAddr.addr()) // chunk index
 	var chunk *pallocData
-	if p.summary[len(p.summary)-1][ci] != 0 {
+	if p.summary[len(p.summary)-1][ci] != 0 { // 注：存在一个summary
 		// Fast path: there's free pages at or near the searchAddr address.
 		chunk = p.chunkOf(ci)
 		j, _ := chunk.find(1, chunkPageIndex(p.searchAddr.addr()))
@@ -153,7 +153,6 @@ func (p *pageAlloc) allocToCache() pageCache {
 			scav:  chunk.scavenged.block64(chunkPageIndex(addr)),
 		}
 	}
-
 	// Set the page bits as allocated and clear the scavenged bits, but
 	// be careful to only set and clear the relevant bits.
 	cpi := chunkPageIndex(c.base)

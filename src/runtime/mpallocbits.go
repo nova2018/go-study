@@ -402,7 +402,7 @@ func findBitRange64(c uint64, n uint) uint {
 			break
 		}
 		// Shift k 0s down into the top of each run of 1s.
-		c &= c >> (k & 63)
+		c &= c >> (k & 63) // 注：优化，快速移位
 		if c == 0 {
 			return 64
 		}

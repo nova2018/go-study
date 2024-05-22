@@ -154,7 +154,7 @@ func (s *mspan) refillAllocCache(whichByte uintptr) {
 // There are hardware instructions that can be used to make this
 // faster if profiling warrants it.
 // 译： nextFreeIndex返回S中位于s.freeindex或之后的下一个可用对象的索引。
-// 如果分析需要的话，可以使用硬件指令来加快这一过程。
+// 译：如果分析需要的话，可以使用硬件指令来加快这一过程。
 func (s *mspan) nextFreeIndex() uintptr {
 	sfreeindex := s.freeindex
 	snelems := s.nelems

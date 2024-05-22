@@ -129,7 +129,7 @@ const (
 	_TinySize      = 16
 	_TinySizeClass = int8(2)
 
-	_FixAllocChunk = 16 << 10 // Chunk size for FixAlloc
+	_FixAllocChunk = 16 << 10 // 注: 16k // Chunk size for FixAlloc
 
 	// Per-P, per order stack segment cache size.
 	_StackCacheSize = 32 * 1024
@@ -1434,12 +1434,12 @@ var globalAlloc struct {
 
 // persistentChunkSize is the number of bytes we allocate when we grow
 // a persistentAlloc.
-const persistentChunkSize = 256 << 10
+const persistentChunkSize = 256 << 10 // 注：256k
 
 // persistentChunks is a list of all the persistent chunks we have
 // allocated. The list is maintained through the first word in the
 // persistent chunk. This is updated atomically.
-var persistentChunks *notInHeap
+var persistentChunks *notInHeap // 注：单向链表的头指针
 
 // Wrapper around sysAlloc that can allocate small chunks.
 // There is no associated free operation.
@@ -1447,6 +1447,12 @@ var persistentChunks *notInHeap
 // If align is 0, uses default align (currently 8).
 // The returned memory will be zeroed.
 // sysStat must be non-nil.
+// 译：包装可以分配小块的sysAlloc。
+// 译：没有相关的空闲操作。
+// 译：用于函数/类型/调试相关的持久性数据。
+// 译：如果align为0，则使用默认align（当前为8）。
+// 译：返回的内存将归零。
+// 译：sysStat必须为非零。
 //
 // Consider marking persistentalloc'd types not in heap by embedding
 // runtime/internal/sys.NotInHeap.
@@ -1481,6 +1487,7 @@ func persistentalloc1(size, align uintptr, sysStat *sysMemStat) *notInHeap {
 		align = 8
 	}
 
+	// 注：大空间分配，大于64k
 	if size >= maxBlock {
 		return (*notInHeap)(sysAlloc(size, sysStat))
 	}
@@ -1488,15 +1495,15 @@ func persistentalloc1(size, align uintptr, sysStat *sysMemStat) *notInHeap {
 	mp := acquirem()
 	var persistent *persistentAlloc
 	if mp != nil && mp.p != 0 {
-		persistent = &mp.p.ptr().palloc
+		persistent = &mp.p.ptr().palloc // 注：存在p，则使用p的cache
 	} else {
-		lock(&globalAlloc.mutex)
+		lock(&globalAlloc.mutex) // 注：+锁，使用全局cache
 		persistent = &globalAlloc.persistentAlloc
 	}
-	persistent.off = alignUp(persistent.off, align)
-	if persistent.off+size > persistentChunkSize || persistent.base == nil {
-		persistent.base = (*notInHeap)(sysAlloc(persistentChunkSize, &memstats.other_sys))
-		if persistent.base == nil {
+	persistent.off = alignUp(persistent.off, align)                          // 注：偏移量对齐
+	if persistent.off+size > persistentChunkSize || persistent.base == nil { // 注：剩余空间不足，或未初始化
+		persistent.base = (*notInHeap)(sysAlloc(persistentChunkSize, &memstats.other_sys)) // 注：一次申请256k
+		if persistent.base == nil {                                                        // 注：分配失败
 			if persistent == &globalAlloc.persistentAlloc {
 				unlock(&globalAlloc.mutex)
 			}
@@ -1506,17 +1513,18 @@ func persistentalloc1(size, align uintptr, sysStat *sysMemStat) *notInHeap {
 		// Add the new chunk to the persistentChunks list.
 		for {
 			chunks := uintptr(unsafe.Pointer(persistentChunks))
-			*(*uintptr)(unsafe.Pointer(persistent.base)) = chunks
-			if atomic.Casuintptr((*uintptr)(unsafe.Pointer(&persistentChunks)), chunks, uintptr(unsafe.Pointer(persistent.base))) {
+			*(*uintptr)(unsafe.Pointer(persistent.base)) = chunks // 注：构建一个链表？*persistent.base=上一块空间的地址
+			// 注：persistentChunks指向最新一个
+			if atomic.Casuintptr((*uintptr)(unsafe.Pointer(&persistentChunks)), chunks, uintptr(unsafe.Pointer(persistent.base))) { // 注：自旋锁
 				break
 			}
 		}
-		persistent.off = alignUp(goarch.PtrSize, align)
+		persistent.off = alignUp(goarch.PtrSize, align) // 注：偏移量，对齐，移动一个指针位。第一位是链表指针
 	}
-	p := persistent.base.add(persistent.off)
-	persistent.off += size
+	p := persistent.base.add(persistent.off) // 注：取得本次指针
+	persistent.off += size                   // 注：偏移量+1
 	releasem(mp)
-	if persistent == &globalAlloc.persistentAlloc {
+	if persistent == &globalAlloc.persistentAlloc { // 注：释放全局锁
 		unlock(&globalAlloc.mutex)
 	}
 

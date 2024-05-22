@@ -178,26 +178,33 @@ func blockAlignSummaryRange(level int, lo, hi int) (int, int) {
 
 type pageAlloc struct {
 	// Radix tree of summaries.
+	// 译：摘要的基数树。
 	//
 	// Each slice's cap represents the whole memory reservation.
 	// Each slice's len reflects the allocator's maximum known
 	// mapped heap address for that level.
+	// 译：每个片的cap代表整个内存预留。
+	// 译：每个片的len反映分配器已知的在该级别的映射堆地址最大值。
 	//
 	// The backing store of each summary level is reserved in init
 	// and may or may not be committed in grow (small address spaces
 	// may commit all the memory in init).
+	// 译：每个汇总级的后备存储在init中保留并且可以在grow中提交，也可以不提交。(小地址空间可以在init中的提交所有内存)
 	//
 	// The purpose of keeping len <= cap is to enforce bounds checks
 	// on the top end of the slice so that instead of an unknown
 	// runtime segmentation fault, we get a much friendlier out-of-bounds
 	// error.
+	// 译：保留len<=cap的目的是执行边界检查，在切片的顶端，因此不是未知的，运行时分段错误，我们得到一个更友好的越界错误。
 	//
 	// To iterate over a summary level, use inUse to determine which ranges
 	// are currently available. Otherwise one might try to access
 	// memory which is only Reserved which may result in a hard fault.
+	// 译：要遍历汇总级别，请使用inUse确定哪些范围，目前都是可用的。否则，用户可能会尝试访问，只保留可能导致硬故障的内存。
 	//
 	// We may still get segmentation faults < len since some of that
 	// memory may not be committed yet.
+	// 译：我们可能仍然会遇到分段错误<len，因为其中一些内存可能尚未提交。
 	summary [summaryLevels][]pallocSum
 
 	// chunks is a slice of bitmap chunks.
@@ -898,7 +905,7 @@ const (
 
 	// maxPackedValue is the maximum value that any of the three fields in
 	// the pallocSum may take on.
-	maxPackedValue    = 1 << logMaxPackedValue
+	maxPackedValue    = 1 << logMaxPackedValue // 注：1<<21
 	logMaxPackedValue = logPallocChunkPages + (summaryLevels-1)*summaryLevelBits
 
 	freeChunkSum = pallocSum(uint64(pallocChunkPages) |
@@ -911,7 +918,7 @@ const (
 // a bitmap and are thus counts, each of which may have a maximum value of
 // 2^21 - 1, or all three may be equal to 2^21. The latter case is represented
 // by just setting the 64th bit.
-type pallocSum uint64
+type pallocSum uint64 // 注：高位end 中位max 低位start
 
 // packPallocSum takes a start, max, and end value and produces a pallocSum.
 func packPallocSum(start, max, end uint) pallocSum {

@@ -81,7 +81,7 @@ func (c *mcentral) fullSwept(sweepgen uint32) *spanSet {
 // 译：分配一个span用于mcache
 func (c *mcentral) cacheSpan() *mspan {
 	// Deduct credit for this span allocation and sweep if necessary.
-	// 扣除此span分配的贷项，如有必要，进行扫描。
+	// 译：扣除此span分配的贷项，如有必要，进行扫描。
 	spanBytes := uintptr(class_to_allocnpages[c.spanclass.sizeclass()]) * _PageSize // 注：应该是页空间，即span的字节数
 	deductSweepCredit(spanBytes, 0)
 
